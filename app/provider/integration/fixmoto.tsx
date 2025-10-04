@@ -487,12 +487,14 @@ export default function FixMoToday() {
                                                         description={serviceName}/>
                                             </MapView>
 
-                                            {(item.appointment_status === "scheduled" || item.appointment_status === "approved") && isApproved && isAppointmentDateReached(item.scheduled_date) && (
+                                            {/* TEMPORARILY ENABLED FOR DEMO - REMOVE DATE CHECK */}
+                                            {(item.appointment_status === "scheduled" || item.appointment_status === "approved" || item.appointment_status === "confirmed") && isApproved && (
                                                 <TouchableOpacity style={styles.actionButton} onPress={() => handleEnRoute(item)}>
                                                     <Text style={styles.actionButtonText}>En Route to Fix</Text>
                                                 </TouchableOpacity>
                                             )}
 
+                                            {/* TEMPORARILY COMMENTED OUT FOR DEMO
                                             {(item.appointment_status === "scheduled" || item.appointment_status === "approved") && isApproved && !isAppointmentDateReached(item.scheduled_date) && (
                                                 <View style={styles.disabledButton}>
                                                     <Ionicons name="time-outline" size={16} color="#999" />
@@ -501,6 +503,7 @@ export default function FixMoToday() {
                                                     </Text>
                                                 </View>
                                             )}
+                                            */}
 
                                             {(item.appointment_status === "in-progress" || item.appointment_status === "ongoing") && isApproved && (
                                                 <TouchableOpacity 
@@ -520,7 +523,7 @@ export default function FixMoToday() {
                                                         </View>
                                                     )}
                                                     <Text style={styles.completedLabel}>Final Price:</Text>
-                                                    <Text style={styles.completedValue}>₱{item.final_price.toFixed(2)}</Text>
+                                                    <Text style={styles.completedValue}>₱{typeof item.final_price === 'number' && item.final_price !== null ? item.final_price.toFixed(2) : '0.00'}</Text>
                                                     {item.repairDescription && (
                                                         <>
                                                             <Text style={styles.completedLabel}>Repair Description:</Text>

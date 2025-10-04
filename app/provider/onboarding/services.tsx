@@ -307,9 +307,11 @@ export default function AddServices() {
         <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.push("/provider/integration/myservices")}>
-                    <Text style={styles.headerTitle}>Add Services</Text>
+                <TouchableOpacity onPress={() => router.back()}>
+                    <Ionicons name="arrow-back" size={24} color="#000" />
                 </TouchableOpacity>
+                <Text style={styles.headerTitle}>Add Services</Text>
+                <View style={{ width: 24 }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContainer}>
@@ -465,11 +467,11 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: "row",
         alignItems: "center",
+        justifyContent: "space-between",
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: "#ddd",
-        justifyContent: "center",
     },
     headerTitle: { fontSize: 18, fontFamily: "Poppins_600SemiBold" },
     scrollContainer: {
