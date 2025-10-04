@@ -1,4 +1,4 @@
-const DEFAULT_BASE_URL = 'https://fixmo-backend-production.up.railway.app';
+const DEFAULT_BASE_URL = 'https://fixmo-backend.vercel.app';
 
 // Allow overriding via Expo public env (set EXPO_PUBLIC_API_URL)
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL || DEFAULT_BASE_URL;
