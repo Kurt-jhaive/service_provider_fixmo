@@ -1,13 +1,28 @@
-import {View, Text, StyleSheet, TouchableOpacity, Alert} from "react-native";
-import {useRouter} from "expo-router";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from "expo-router";
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 const Logout = () => {
     const router = useRouter();
 
-    const handleLogout = (): void => {
-        // TODO: Clear session/auth token here
-        console.log("User logged out");
-        router.replace("/login");
+    const handleLogout = async (): Promise<void> => {
+        try {
+            // Remove common auth/session keys. Adjust keys if your app uses different names.
+            await AsyncStorage.multiRemove([
+                'providerToken',
+                'token',
+                'providerId',
+                'userId',
+                'providerProfile',
+                'userProfile'
+            ]);
+            console.log('User logged out - cleared AsyncStorage keys');
+        } catch (error) {
+            console.error('Error clearing AsyncStorage during logout:', error);
+        }
+
+        // Navigate back to login screen (use actual auth route)
+        router.replace('/auth/SignInScreen');
     };
 
     const confirmLogout = (): void => {

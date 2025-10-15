@@ -6,7 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Picker } from "@react-native-picker/picker";
-import AppLoading from "expo-app-loading";
+import * as SplashScreen from 'expo-splash-screen';
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -165,7 +165,14 @@ export default function AddServices() {
         Poppins_400Regular,
         Poppins_600SemiBold,
     });
-    if (!fontsLoaded) return <AppLoading />;
+    if (!fontsLoaded) {
+        return (
+            <SafeAreaView style={{ flex: 1, backgroundColor: "#fff", justifyContent: "center", alignItems: "center" }}>
+                <ActivityIndicator size="large" color="#1e6355" />
+                <Text style={{ marginTop: 12, fontFamily: "Poppins_400Regular" }}>Loading...</Text>
+            </SafeAreaView>
+        );
+    }
 
     // Pick image (max 5)
     const pickImage = async () => {

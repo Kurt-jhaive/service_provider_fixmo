@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Fixmo",
+    "name": "Fixmo-Provider",
     "slug": "Fixmo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./app/assets/images/FixMoLogo1.png",
-    "scheme": "fixmo",
+  "scheme": "fixmo-provider",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -22,7 +22,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.Fixmo"
+      "package": "com.fixmo.provider"
     },
     "web": {
       "bundler": "metro",
@@ -44,6 +44,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f4dc792c-eea7-4c80-91a2-eccbb926603d"
+      }
     }
   }
 }
