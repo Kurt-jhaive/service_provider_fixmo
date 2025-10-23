@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect, useState } from "react";
 
 type ScheduledWork = {
     status: "scheduled" | "ongoing" | "finished";
@@ -178,6 +178,10 @@ export const UserProvider = ({children}: { children: React.ReactNode }) => {
 
         // Clear all AsyncStorage data related to authentication and sessions
         try {
+            // First get all keys to see what we're dealing with
+            const allKeys = await AsyncStorage.getAllKeys();
+            console.log('📋 All AsyncStorage keys before logout:', allKeys);
+            
             const keysToRemove = [
                 'providerToken',
                 'providerId',
@@ -185,11 +189,21 @@ export const UserProvider = ({children}: { children: React.ReactNode }) => {
                 'userToken',
                 'userId',
                 'user_id',
-                // Add any other session-related keys
+                'fcmToken',
+                'expoPushToken',
             ];
             
-            await AsyncStorage.multiRemove(keysToRemove);
-            console.log('🗑️ Cleared AsyncStorage session data:', keysToRemove);
+            // Filter to only remove keys that exist
+            const existingKeysToRemove = keysToRemove.filter(key => allKeys.includes(key));
+            
+            if (existingKeysToRemove.length > 0) {
+                await AsyncStorage.multiRemove(existingKeysToRemove);
+                console.log('🗑️ Cleared AsyncStorage session data:', existingKeysToRemove);
+            }
+            
+            // Verify clearance
+            const remainingKeys = await AsyncStorage.getAllKeys();
+            console.log('📋 Remaining AsyncStorage keys after logout:', remainingKeys);
         } catch (error) {
             console.error('Failed to clear AsyncStorage on logout:', error);
         }

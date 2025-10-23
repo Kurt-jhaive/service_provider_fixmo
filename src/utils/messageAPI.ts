@@ -375,13 +375,18 @@ export class MessageService {
 
   static disconnect(): void {
     if (MessageService.socket) {
+      console.log('🔌 Disconnecting socket...');
+      MessageService.socket.removeAllListeners(); // Remove all event listeners
       MessageService.socket.disconnect();
       MessageService.socket = null;
+      console.log('✅ Socket disconnected and cleared');
     }
   }
 
   static reset(): void {
+    console.log('🧹 Resetting MessageService...');
     MessageService.disconnect();
     MessageService.instance = null;
+    console.log('✅ MessageService reset complete');
   }
 }

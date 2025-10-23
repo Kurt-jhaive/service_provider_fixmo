@@ -65,14 +65,37 @@ export default function ChatScreen() {
     const checkUserAndRefresh = async () => {
         const storedProviderId = await AsyncStorage.getItem("provider_id");
         
+        // If logged out (no providerId), clear everything and go back
+        if (!storedProviderId) {
+            console.log('🚪 No provider ID found - user logged out, clearing chat');
+            setMessages([]);
+            setLoading(false);
+            
+            // Disconnect socket
+            if (socketRef.current) {
+                socketRef.current.removeAllListeners();
+                socketRef.current.disconnect();
+                socketRef.current = null;
+            }
+            
+            currentUserIdRef.current = null;
+            // Navigate back since user is logged out
+            router.back();
+            return;
+        }
+        
         // If user has changed, clear messages and reload
         if (currentUserIdRef.current !== null && currentUserIdRef.current !== storedProviderId) {
             console.log('🔄 Different user detected in chat, clearing messages');
+            console.log('   Previous user:', currentUserIdRef.current);
+            console.log('   New user:', storedProviderId);
+            
             setMessages([]);
             setLoading(true);
             
             // Disconnect old socket
             if (socketRef.current) {
+                socketRef.current.removeAllListeners();
                 socketRef.current.disconnect();
                 socketRef.current = null;
             }

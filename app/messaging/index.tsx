@@ -46,15 +46,37 @@ export default function MessagesListScreen() {
     const checkUserAndRefresh = async () => {
         const providerId = await AsyncStorage.getItem("provider_id");
         
+        // If logged out (no providerId), clear everything
+        if (!providerId) {
+            console.log('🚪 No provider ID found - user logged out, clearing all data');
+            setConversations([]);
+            setFilteredConversations([]);
+            setLoading(false);
+            
+            // Disconnect socket
+            if (socketRef.current) {
+                socketRef.current.removeAllListeners();
+                socketRef.current.disconnect();
+                socketRef.current = null;
+            }
+            
+            currentUserIdRef.current = null;
+            return;
+        }
+        
         // If user has changed, clear conversations and reload
         if (currentUserIdRef.current !== null && currentUserIdRef.current !== providerId) {
             console.log('🔄 Different user detected, clearing conversations');
+            console.log('   Previous user:', currentUserIdRef.current);
+            console.log('   New user:', providerId);
+            
             setConversations([]);
             setFilteredConversations([]);
             setLoading(true);
             
             // Disconnect old socket
             if (socketRef.current) {
+                socketRef.current.removeAllListeners();
                 socketRef.current.disconnect();
                 socketRef.current = null;
             }
