@@ -1,11 +1,11 @@
 import { API_CONFIG } from '../constants/config';
 import type {
-    AvailabilitiesListResponse,
-    Availability,
-    AvailabilityResponse,
-    CreateAvailabilityRequest,
-    DayOfWeek,
-    UpdateAvailabilityRequest,
+  AvailabilitiesListResponse,
+  Availability,
+  AvailabilityResponse,
+  CreateAvailabilityRequest,
+  DayOfWeek,
+  UpdateAvailabilityRequest,
 } from '../types/availability';
 
 /**
@@ -127,29 +127,44 @@ export const updateAvailability = async (
 };
 
 /**
- * Toggle availability for a specific day (convenience function)
- * @param providerId - The ID of the provider
- * @param dayOfWeek - The day to toggle
- * @param isActive - Whether to activate or deactivate
+ * Toggle availability for an entire day (enable/disable all time slots)
+ * @param dayOfWeek - The day of the week to toggle
+ * @param isActive - Whether to enable (true) or disable (false) the day
  * @param token - JWT authentication token
  */
 export const toggleDayAvailability = async (
-  providerId: number,
   dayOfWeek: DayOfWeek,
   isActive: boolean,
   token: string
-): Promise<Availability> => {
-  // Create or update with default 8 AM start time
-  const availabilityData: CreateAvailabilityRequest[] = [
-    {
-      dayOfWeek,
-      isAvailable: isActive,
-      startTime: '08:00',
-      endTime: '17:00', // Default end time
-    },
-  ];
+): Promise<void> => {
+  try {
+    console.log(`Toggling ${dayOfWeek} availability to: ${isActive}`);
+    
+    const response = await fetch(
+      `${API_CONFIG.BASE_URL}/api/availability/toggle-day`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          dayOfWeek,
+          isActive,
+        }),
+      }
+    );
 
-  return setAvailability(availabilityData, token);
+    const data = await response.json();
+    console.log('Toggle day availability response:', JSON.stringify(data));
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || 'Failed to toggle day availability');
+    }
+  } catch (error: any) {
+    console.error('Toggle Day Availability Error:', error);
+    throw new Error(error.message || 'Network error. Please try again.');
+  }
 };
 
 /**
@@ -191,6 +206,104 @@ export const updateAvailabilityByDate = async (
     return data;
   } catch (error: any) {
     console.error('Update Availability By Date Error:', error);
+    throw new Error(error.message || 'Network error. Please try again.');
+  }
+};
+
+/**
+ * Add a time-range availability slot for a specific day
+ * @param dayOfWeek - The day of the week
+ * @param startTime - Start time in HH:MM format
+ * @param endTime - End time in HH:MM format
+ * @param token - JWT authentication token
+ */
+export const addTimeRangeAvailability = async (
+  dayOfWeek: DayOfWeek,
+  startTime: string,
+  endTime: string,
+  token: string
+): Promise<Availability> => {
+  try {
+    console.log(`Adding time-range availability: ${dayOfWeek} ${startTime}-${endTime}`);
+    
+    const response = await fetch(
+      `${API_CONFIG.BASE_URL}/api/availability/time-range`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          dayOfWeek,
+          startTime,
+          endTime,
+        }),
+      }
+    );
+
+    const data: AvailabilityResponse = await response.json();
+    console.log('Add time-range availability response:', JSON.stringify(data));
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || 'Failed to add time-range availability');
+    }
+
+    if (!data.data) {
+      throw new Error('No availability data received');
+    }
+
+    return data.data;
+  } catch (error: any) {
+    console.error('Add Time-Range Availability Error:', error);
+    throw new Error(error.message || 'Network error. Please try again.');
+  }
+};
+
+/**
+ * Delete a specific availability slot
+ * @param availabilityId - The ID of the availability slot to delete
+ * @param token - JWT authentication token
+ */
+export const deleteAvailability = async (
+  availabilityId: number,
+  token: string
+): Promise<void> => {
+  try {
+    console.log(`Deleting availability slot: ${availabilityId}`);
+    
+    const response = await fetch(
+      `${API_CONFIG.BASE_URL}/api/availability/${availabilityId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const data = await response.json();
+    console.log('Delete availability response:', JSON.stringify(data));
+
+    if (!response.ok || !data.success) {
+      // Check for foreign key constraint error
+      if (data.message && (
+        data.message.includes('foreign key') || 
+        data.message.includes('constraint') ||
+        data.message.includes('referenced') ||
+        data.message.includes('appointments')
+      )) {
+        throw new Error('Cannot delete this time slot because it has scheduled appointments. Please complete or cancel those appointments first.');
+      }
+      throw new Error(data.message || 'Failed to delete availability');
+    }
+  } catch (error: any) {
+    console.error('Delete Availability Error:', error);
+    // Re-throw with the original message if it's already a user-friendly message
+    if (error.message.includes('Cannot delete this time slot')) {
+      throw error;
+    }
     throw new Error(error.message || 'Network error. Please try again.');
   }
 };

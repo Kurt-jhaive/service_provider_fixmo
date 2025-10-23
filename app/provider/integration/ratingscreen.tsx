@@ -29,11 +29,13 @@ export default function RatingScreen() {
     const { user } = useUserContext();
     const [providerId, setProviderId] = useState<number | null>(null);
     const [ratings, setRatings] = useState<Rating[]>([]);
+    const [allRatings, setAllRatings] = useState<Rating[]>([]); // Store all ratings for filtering
     const [statistics, setStatistics] = useState<RatingStatistics | null>(null);
     const [pagination, setPagination] = useState<RatingsPagination | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
+    const [filterValue, setFilterValue] = useState<number | null>(null); // null = All ratings
 
     // Prevent going back to OTP screen - navigate to profile instead
     useFocusEffect(
@@ -108,14 +110,21 @@ export default function RatingScreen() {
             });
 
             if (response.success) {
+                setAllRatings(response.data.ratings); // Store all ratings
                 setRatings(response.data.ratings);
                 setStatistics(response.data.statistics);
                 setPagination(response.data.pagination);
                 console.log('✅ Ratings loaded successfully');
+                
+                // Apply filter if one is set
+                if (filterValue !== null) {
+                    applyFilter(filterValue, response.data.ratings);
+                }
             } else {
                 console.error('❌ Failed to load ratings:', response.message);
                 // Set empty data so UI shows empty state instead of loading forever
                 setRatings([]);
+                setAllRatings([]);
                 setStatistics(null);
                 setPagination(null);
             }
@@ -123,6 +132,7 @@ export default function RatingScreen() {
             console.error('💥 Error loading ratings:', error);
             // Set empty data on error
             setRatings([]);
+            setAllRatings([]);
             setStatistics(null);
             setPagination(null);
         } finally {
@@ -134,6 +144,7 @@ export default function RatingScreen() {
 
     const handleRefresh = () => {
         setCurrentPage(1);
+        setFilterValue(null); // Reset filter on refresh
         loadRatings(true);
     };
 
@@ -143,32 +154,67 @@ export default function RatingScreen() {
         }
     };
 
+    const applyFilter = (starRating: number | null, ratingsData: Rating[] = allRatings) => {
+        console.log('🔍 Applying filter:', starRating);
+        
+        if (starRating === null) {
+            // Show all ratings
+            setRatings(ratingsData);
+        } else {
+            // Filter by star rating
+            const filtered = ratingsData.filter(rating => 
+                Math.floor(rating.rating_value) === starRating
+            );
+            setRatings(filtered);
+        }
+    };
+
+    const handleFilterChange = (starRating: number | null) => {
+        setFilterValue(starRating);
+        applyFilter(starRating);
+    };
+
     const renderStars = (rating: number) => {
-        const fullStars = Math.floor(rating);
-        const hasHalfStar = rating - fullStars >= 0.5;
-        const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
+        try {
+            // Ensure rating is a valid number
+            const safeRating = isNaN(rating) || rating < 0 ? 0 : Math.min(rating, 5);
+            
+            const fullStars = Math.floor(safeRating);
+            const hasHalfStar = safeRating - fullStars >= 0.5;
+            const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
 
-        const stars = [];
+            const stars = [];
 
-        for (let i = 0; i < fullStars; i++) {
-            stars.push(
-                <Ionicons key={`full-${i}`} name="star" size={22} color="#FFD700"/>
+            for (let i = 0; i < fullStars; i++) {
+                stars.push(
+                    <Ionicons key={`full-${i}`} name="star" size={22} color="#FFD700"/>
+                );
+            }
+
+            if (hasHalfStar) {
+                stars.push(
+                    <Ionicons key="half" name="star-half" size={22} color="#FFD700"/>
+                );
+            }
+
+            for (let i = 0; i < emptyStars; i++) {
+                stars.push(
+                    <Ionicons key={`empty-${i}`} name="star-outline" size={22} color="#FFD700"/>
+                );
+            }
+
+            return <View style={styles.starRow}>{stars}</View>;
+        } catch (error) {
+            console.error('Error rendering stars:', error);
+            // Return empty stars as fallback
+            return (
+                <View style={styles.starRow}>
+                    {[1, 2, 3, 4, 5].map((i) => (
+                        <Ionicons key={`empty-${i}`} name="star-outline" size={22} color="#FFD700"/>
+                    ))}
+                </View>
             );
         }
-
-        if (hasHalfStar) {
-            stars.push(
-                <Ionicons key="half" name="star-half" size={22} color="#FFD700"/>
-            );
-        }
-
-        for (let i = 0; i < emptyStars; i++) {
-            stars.push(
-                <Ionicons key={`empty-${i}`} name="star-outline" size={22} color="#FFD700"/>
-            );
-        }
-
-        return <View style={styles.starRow}>{stars}</View>;
     };
 
     const formatDate = (dateString: string) => {
@@ -238,46 +284,101 @@ export default function RatingScreen() {
             <View style={styles.headerContainer}>
                 <Text style={styles.header}>Ratings & Reviews</Text>
                 
-                {statistics && (
+                {statistics && statistics.average_rating !== undefined && (
                     <>
                         <Text style={styles.overallLabel}>Overall Rating</Text>
                         <Text style={styles.overallScore}>
-                            {statistics.average_rating.toFixed(1)}
+                            {(statistics.average_rating || 0).toFixed(1)}
                         </Text>
-                        {renderStars(statistics.average_rating)}
+                        <View style={styles.starsCenter}>
+                            {renderStars(statistics.average_rating || 0)}
+                        </View>
                         <Text style={styles.totalReviews}>
-                            {statistics.total_ratings} total review{statistics.total_ratings !== 1 ? 's' : ''}
+                            {statistics.total_ratings || 0} total review{(statistics.total_ratings || 0) !== 1 ? 's' : ''}
                         </Text>
 
                         {/* Rating Distribution */}
-                        {statistics.rating_distribution.length > 0 && (
+                        {statistics.rating_distribution && statistics.rating_distribution.length > 0 && (
                             <View style={styles.distributionContainer}>
                                 {statistics.rating_distribution
                                     .sort((a, b) => b.star - a.star)
-                                    .map((dist) => (
-                                        <View key={dist.star} style={styles.distributionRow}>
-                                            <Text style={styles.distributionStar}>
-                                                {dist.star} ⭐
-                                            </Text>
-                                            <View style={styles.distributionBar}>
-                                                <View 
-                                                    style={[
-                                                        styles.distributionFill,
-                                                        { 
-                                                            width: `${(dist.count / statistics.total_ratings) * 100}%` 
-                                                        }
-                                                    ]} 
-                                                />
+                                    .map((dist) => {
+                                        const totalRatings = statistics.total_ratings || 1; // Prevent division by zero
+                                        const percentage = (dist.count / totalRatings) * 100;
+                                        
+                                        return (
+                                            <View key={dist.star} style={styles.distributionRow}>
+                                                <Text style={styles.distributionStar}>
+                                                    {dist.star} ⭐
+                                                </Text>
+                                                <View style={styles.distributionBar}>
+                                                    <View 
+                                                        style={[
+                                                            styles.distributionFill,
+                                                            { 
+                                                                width: `${Math.min(percentage, 100)}%` 
+                                                            }
+                                                        ]} 
+                                                    />
+                                                </View>
+                                                <Text style={styles.distributionCount}>
+                                                    {dist.count}
+                                                </Text>
                                             </View>
-                                            <Text style={styles.distributionCount}>
-                                                {dist.count}
-                                            </Text>
-                                        </View>
-                                    ))}
+                                        );
+                                    })}
                             </View>
                         )}
                     </>
                 )}
+
+                {/* Filter Section */}
+                <View style={styles.filterContainer}>
+                    <Text style={styles.filterLabel}>Filter by Rating:</Text>
+                    <ScrollView 
+                        horizontal 
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.filterScrollContent}
+                    >
+                        <TouchableOpacity 
+                            style={[
+                                styles.filterButton, 
+                                filterValue === null && styles.filterButtonActive
+                            ]}
+                            onPress={() => handleFilterChange(null)}
+                        >
+                            <Text style={[
+                                styles.filterButtonText,
+                                filterValue === null && styles.filterButtonTextActive
+                            ]}>
+                                All
+                            </Text>
+                        </TouchableOpacity>
+
+                        {[5, 4, 3, 2, 1].map((star) => (
+                            <TouchableOpacity 
+                                key={star}
+                                style={[
+                                    styles.filterButton, 
+                                    filterValue === star && styles.filterButtonActive
+                                ]}
+                                onPress={() => handleFilterChange(star)}
+                            >
+                                <Ionicons 
+                                    name="star" 
+                                    size={14} 
+                                    color={filterValue === star ? '#FFF' : '#FFD700'} 
+                                />
+                                <Text style={[
+                                    styles.filterButtonText,
+                                    filterValue === star && styles.filterButtonTextActive
+                                ]}>
+                                    {star}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
 
                 <Text style={styles.sectionTitle}>Customer Reviews</Text>
             </View>
@@ -304,35 +405,45 @@ export default function RatingScreen() {
                     </View>
                 ) : (
                     <>
-                        {ratings.map((rating) => (
-                            <View key={rating.id} style={styles.ratingCard}>
-                                {/* Customer Info */}
-                                <View style={styles.customerRow}>
-                                    {rating.user?.profile_photo ? (
-                                        <Image 
-                                            source={{ uri: rating.user.profile_photo }} 
-                                            style={styles.customerPhoto}
-                                        />
-                                    ) : (
-                                        <View style={[styles.customerPhoto, styles.customerPhotoPlaceholder]}>
-                                            <Ionicons name="person" size={24} color="#666" />
+                        {ratings.map((rating) => {
+                            // Safety check to prevent crashes
+                            if (!rating || !rating.id) {
+                                console.warn('⚠️ Invalid rating object:', rating);
+                                return null;
+                            }
+
+                            return (
+                                <View key={rating.id} style={styles.ratingCard}>
+                                    {/* Customer Info */}
+                                    <View style={styles.customerRow}>
+                                        {rating.user?.profile_photo ? (
+                                            <Image 
+                                                source={{ uri: rating.user.profile_photo }} 
+                                                style={styles.customerPhoto}
+                                                onError={(error) => {
+                                                    console.warn('Failed to load profile photo:', error);
+                                                }}
+                                            />
+                                        ) : (
+                                            <View style={[styles.customerPhoto, styles.customerPhotoPlaceholder]}>
+                                                <Ionicons name="person" size={24} color="#666" />
+                                            </View>
+                                        )}
+                                        <View style={styles.customerInfo}>
+                                            <Text style={styles.customerName}>
+                                                {rating.user?.first_name && rating.user?.last_name
+                                                    ? `${rating.user.first_name} ${rating.user.last_name}` 
+                                                    : 'Anonymous'
+                                                }
+                                            </Text>
+                                            <Text style={styles.ratingDate}>
+                                                {rating.created_at ? formatDate(rating.created_at) : 'N/A'}
+                                            </Text>
                                         </View>
-                                    )}
-                                    <View style={styles.customerInfo}>
-                                        <Text style={styles.customerName}>
-                                            {rating.user ? 
-                                                `${rating.user.first_name} ${rating.user.last_name}` : 
-                                                'Anonymous'
-                                            }
-                                        </Text>
-                                        <Text style={styles.ratingDate}>
-                                            {formatDate(rating.created_at)}
-                                        </Text>
+                                        <View style={styles.ratingValueContainer}>
+                                            {renderStars(rating.rating_value || 0)}
+                                        </View>
                                     </View>
-                                    <View style={styles.ratingValueContainer}>
-                                        {renderStars(rating.rating_value)}
-                                    </View>
-                                </View>
 
                                 {/* Service Info */}
                                 {rating.appointment?.service && (
@@ -351,16 +462,20 @@ export default function RatingScreen() {
                                     </Text>
                                 )}
 
-                                {/* Photo */}
-                                {rating.rating_photo && (
-                                    <Image 
-                                        source={{ uri: rating.rating_photo }} 
-                                        style={styles.ratingPhoto}
-                                        resizeMode="cover"
-                                    />
-                                )}
-                            </View>
-                        ))}
+                                    {/* Photo */}
+                                    {rating.rating_photo && (
+                                        <Image 
+                                            source={{ uri: rating.rating_photo }} 
+                                            style={styles.ratingPhoto}
+                                            resizeMode="cover"
+                                            onError={(error) => {
+                                                console.warn('Failed to load rating photo:', error);
+                                            }}
+                                        />
+                                    )}
+                                </View>
+                            );
+                        })}
 
                         {/* Load More Button */}
                         {pagination && pagination.has_next && (
@@ -503,6 +618,50 @@ const styles = StyleSheet.create({
     starRow: {
         flexDirection: "row",
         marginBottom: 6,
+    },
+    starsCenter: {
+        flexDirection: "row",
+        justifyContent: "center",
+        alignItems: "center",
+        marginBottom: 6,
+    },
+    filterContainer: {
+        marginTop: 20,
+        marginBottom: 10,
+    },
+    filterLabel: {
+        fontSize: 14,
+        fontFamily: "PoppinsSemiBold",
+        color: "#333",
+        marginBottom: 12,
+    },
+    filterScrollContent: {
+        flexDirection: "row",
+        gap: 8,
+        paddingVertical: 4,
+    },
+    filterButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        backgroundColor: "#F5F5F5",
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: "#E0E0E0",
+    },
+    filterButtonActive: {
+        backgroundColor: "#008080",
+        borderColor: "#008080",
+    },
+    filterButtonText: {
+        fontSize: 14,
+        fontFamily: "PoppinsMedium",
+        color: "#666",
+    },
+    filterButtonTextActive: {
+        color: "#FFF",
     },
     emptyContainer: {
         flex: 1,

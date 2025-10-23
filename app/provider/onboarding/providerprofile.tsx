@@ -113,14 +113,14 @@ export default function ProviderProfile() {
                 });
             }
 
-            // Clear storage and logout
-            logout();
+            // Clear storage and logout (includes message session cleanup)
+            await logout();
             closeLogout();
             router.replace("/");
         } catch (error) {
             console.error('Logout error:', error);
             // Still proceed with logout even if push cleanup fails
-            logout();
+            await logout();
             closeLogout();
             router.replace("/");
         }

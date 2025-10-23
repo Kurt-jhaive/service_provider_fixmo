@@ -309,7 +309,25 @@ export class MessageAPI {
     });
 
     socket.on('join_conversation_failed', (error) => {
-      console.error('❌ Failed to join conversation:', error);
+      // Handle different failure reasons gracefully
+      if (error.reason === 'expired' || error.error?.includes('warranty period has expired')) {
+        console.log('⏰ Conversation warranty period has expired:', error.conversationId);
+        // This is expected for old conversations - not an error
+        return;
+      }
+      
+      if (error.reason === 'not_found') {
+        console.warn('⚠️ Conversation not found:', error.conversationId);
+        return;
+      }
+      
+      if (error.reason === 'unauthorized') {
+        console.warn('⚠️ Unauthorized to join conversation:', error.conversationId);
+        return;
+      }
+      
+      // Log unexpected errors as warnings, not errors
+      console.warn('⚠️ Failed to join conversation:', error);
     });
   }
 

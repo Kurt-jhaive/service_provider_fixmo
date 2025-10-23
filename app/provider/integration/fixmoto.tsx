@@ -16,7 +16,7 @@ import {
     UIManager,
     View,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import { WebView } from "react-native-webview";
 import { cancelAppointmentByProvider, completeAppointment, getAppointmentsByProviderId, startEnRoute } from "../../../src/api/booking.api";
 import { getUnratedAppointments } from "../../../src/api/ratings.api";
 import BackjobBadge from "../../../src/components/backjob/BackjobBadge";
@@ -257,10 +257,20 @@ export default function FixMoToday() {
 
     const handleChat = async (appointment: Appointment) => {
         try {
+            console.log('💬 Opening chat for appointment:', appointment.appointment_id);
+            
+            // Validate appointment data
+            if (!appointment || !appointment.customer_id) {
+                console.error('❌ Invalid appointment data:', appointment);
+                Alert.alert('Error', 'Invalid appointment data. Cannot open chat.');
+                return;
+            }
+
             const token = await AsyncStorage.getItem('providerToken');
-            const providerId = await AsyncStorage.getItem('provider_id');
+            const providerId = await AsyncStorage.getItem('providerId');
             
             if (!token || !providerId) {
+                console.error('❌ Missing authentication');
                 Alert.alert('Error', 'Please log in again');
                 return;
             }
@@ -270,6 +280,8 @@ export default function FixMoToday() {
                 ? `${appointment.customer.first_name} ${appointment.customer.last_name}` 
                 : 'Customer';
             const clientPhone = appointment.customer?.phone_number || '';
+
+            console.log('👤 Customer info:', { customerId, clientName, clientPhone });
 
             // First, check if conversation already exists
             const conversationsResponse = await fetch(
@@ -288,13 +300,18 @@ export default function FixMoToday() {
 
             const conversationsData = await conversationsResponse.json();
             
+            console.log('📋 Conversations data:', conversationsData);
+            
             // Find existing conversation with this customer
             const existingConversation = conversationsData.conversations?.find(
                 (conv: any) => conv.customer_id === customerId
             );
 
-            if (existingConversation) {
+            console.log('🔍 Existing conversation:', existingConversation);
+
+            if (existingConversation && existingConversation.conversation_id) {
                 // Route to existing conversation
+                console.log('✅ Navigating to existing conversation:', existingConversation.conversation_id);
                 router.push({
                     pathname: '/messaging/chat',
                     params: {
@@ -325,12 +342,22 @@ export default function FixMoToday() {
                 );
 
                 if (!createResponse.ok) {
-                    throw new Error('Failed to create conversation');
+                    const errorData = await createResponse.json().catch(() => ({}));
+                    console.error('❌ Create conversation failed:', errorData);
+                    throw new Error(errorData.message || 'Failed to create conversation');
                 }
 
                 const createData = await createResponse.json();
+                console.log('📦 Create conversation response:', createData);
+                
+                // Validate response data
+                if (!createData || !createData.conversation || !createData.conversation.conversation_id) {
+                    console.error('❌ Invalid conversation data:', createData);
+                    throw new Error('Invalid conversation data received from server');
+                }
                 
                 // Route to new conversation
+                console.log('✅ Navigating to new conversation:', createData.conversation.conversation_id);
                 router.push({
                     pathname: '/messaging/chat',
                     params: {
@@ -344,8 +371,12 @@ export default function FixMoToday() {
                 });
             }
         } catch (error: any) {
-            console.error('Error handling chat:', error);
-            Alert.alert('Error', error.message || 'Failed to open conversation');
+            console.error('❌ Error handling chat:', error);
+            console.error('Error stack:', error.stack);
+            Alert.alert(
+                'Error', 
+                error.message || 'Failed to open conversation. Please try again.'
+            );
         }
     };
 
@@ -631,12 +662,14 @@ export default function FixMoToday() {
                                             <Ionicons name="calendar" size={16} color="#00796B"/>
                                             <Text style={styles.datetime}>{formatDateTime(item.scheduled_date)}</Text>
                                         </View>
-                                        <TouchableOpacity
-                                            style={styles.chatButton}
-                                            onPress={() => handleChat(item)}
-                                        >
-                                            <Ionicons name="chatbubble-ellipses" size={20} color="#00796B"/>
-                                        </TouchableOpacity>
+                                        {item.appointment_status !== 'cancelled' && (
+                                            <TouchableOpacity
+                                                style={styles.chatButton}
+                                                onPress={() => handleChat(item)}
+                                            >
+                                                <Ionicons name="chatbubble-ellipses" size={20} color="#00796B"/>
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
 
                                     <TouchableOpacity style={styles.expandButton} onPress={() => toggleCard(item.appointment_id.toString())}>
@@ -651,18 +684,41 @@ export default function FixMoToday() {
                                                 <Text style={styles.location}>{location}</Text>
                                             </View>
 
-                                            <MapView
+                                            <WebView
                                                 style={styles.map}
-                                                initialRegion={{
-                                                    latitude: coords.latitude,
-                                                    longitude: coords.longitude,
-                                                    latitudeDelta: 0.01,
-                                                    longitudeDelta: 0.01,
+                                                source={{
+                                                    html: `
+                                                        <!DOCTYPE html>
+                                                        <html>
+                                                        <head>
+                                                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                                                            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                                                            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                                                            <style>
+                                                                body { margin: 0; padding: 0; }
+                                                                #map { width: 100%; height: 100vh; }
+                                                            </style>
+                                                        </head>
+                                                        <body>
+                                                            <div id="map"></div>
+                                                            <script>
+                                                                var map = L.map('map').setView([${coords.latitude}, ${coords.longitude}], 15);
+                                                                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                                                                    attribution: '© OpenStreetMap contributors',
+                                                                    maxZoom: 19
+                                                                }).addTo(map);
+                                                                var marker = L.marker([${coords.latitude}, ${coords.longitude}]).addTo(map);
+                                                                marker.bindPopup('<b>${clientName.replace(/'/g, "\\'")}</b><br>${serviceName.replace(/'/g, "\\'")}').openPopup();
+                                                            </script>
+                                                        </body>
+                                                        </html>
+                                                    `
                                                 }}
-                                            >
-                                                <Marker coordinate={coords} title={clientName}
-                                                        description={serviceName}/>
-                                            </MapView>
+                                                javaScriptEnabled={true}
+                                                domStorageEnabled={true}
+                                                startInLoadingState={true}
+                                                scalesPageToFit={true}
+                                            />
 
                                             {(item.appointment_status === "scheduled" || item.appointment_status === "approved") && isApproved && isAppointmentDateReached(item.scheduled_date) && (
                                                 <>

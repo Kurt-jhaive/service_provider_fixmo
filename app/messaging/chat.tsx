@@ -53,6 +53,7 @@ export default function ChatScreen() {
     const [replyingTo, setReplyingTo] = useState<Message | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [providerId, setProviderId] = useState<number | null>(null);
+    const [warrantyExpired, setWarrantyExpired] = useState(false);
 
     // Check for user changes when screen is focused
     useFocusEffect(
@@ -211,7 +212,29 @@ export default function ChatScreen() {
         });
 
         socket.on('join_conversation_failed', (error: any) => {
-            console.error('❌ Failed to join conversation:', error);
+            // Handle different failure reasons gracefully
+            if (error.reason === 'expired' || error.error?.includes('warranty period has expired')) {
+                console.log('⏰ Conversation warranty period has expired - read-only mode');
+                setWarrantyExpired(true);
+                // Don't show error alert for expired warranties - this is expected
+                // The conversation is still viewable but no new messages can be sent
+                return;
+            }
+            
+            if (error.reason === 'not_found') {
+                console.warn('⚠️ Conversation not found:', error.conversationId);
+                Alert.alert('Error', 'This conversation no longer exists.');
+                return;
+            }
+            
+            if (error.reason === 'unauthorized') {
+                console.warn('⚠️ Unauthorized access to conversation');
+                Alert.alert('Error', 'You do not have access to this conversation.');
+                return;
+            }
+            
+            // Log other errors as warnings
+            console.warn('⚠️ Failed to join conversation:', error);
         });
     };
 
@@ -615,6 +638,13 @@ export default function ChatScreen() {
                         <Ionicons name="lock-closed-outline" size={18} color="#6c757d" style={{ marginRight: 8 }} />
                         <Text style={styles.readOnlyInputText}>
                             Messaging disabled for completed appointments
+                        </Text>
+                    </View>
+                ) : warrantyExpired ? (
+                    <View style={styles.readOnlyInputContainer}>
+                        <Ionicons name="time-outline" size={18} color="#FF9800" style={{ marginRight: 8 }} />
+                        <Text style={styles.readOnlyInputText}>
+                            Warranty period has expired - messages are read-only
                         </Text>
                     </View>
                 ) : (

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type ScheduledWork = {
     status: "scheduled" | "ongoing" | "finished";
@@ -49,7 +50,7 @@ const UserContext = createContext<{
     addNotification: (notif: Omit<Notification, "id" | "read" | "createdAt">) => void;
     markAllAsRead: () => void;
     cleanUpNotifications: () => void;
-    logout: () => void; // ✅ added
+    logout: () => Promise<void>; // ✅ changed to async
 }>({
     user: defaultUser,
     setUser: () => {
@@ -65,7 +66,7 @@ const UserContext = createContext<{
     },
     cleanUpNotifications: () => {
     },
-    logout: () => {
+    logout: async () => {
     },
 });
 
@@ -150,7 +151,10 @@ export const UserProvider = ({children}: { children: React.ReactNode }) => {
         cleanUpNotifications();
     }, []);
 
-    const logout = () => {
+    const logout = async () => {
+        console.log('🚪 Logging out - clearing all session data');
+        
+        // Reset user state
         setUser({
             name: "",
             phone: "",
@@ -163,13 +167,31 @@ export const UserProvider = ({children}: { children: React.ReactNode }) => {
         setNotifications([]);
         setArchivedNotifications([]);
         
-        // Reset MessageService to clear cached conversations
+        // Reset MessageService to clear cached conversations and disconnect socket
         try {
             const { MessageService } = require('../utils/messageAPI');
             MessageService.reset();
             console.log('🧹 MessageService reset on logout');
         } catch (error) {
             console.error('Failed to reset MessageService:', error);
+        }
+
+        // Clear all AsyncStorage data related to authentication and sessions
+        try {
+            const keysToRemove = [
+                'providerToken',
+                'providerId',
+                'provider_id',
+                'userToken',
+                'userId',
+                'user_id',
+                // Add any other session-related keys
+            ];
+            
+            await AsyncStorage.multiRemove(keysToRemove);
+            console.log('🗑️ Cleared AsyncStorage session data:', keysToRemove);
+        } catch (error) {
+            console.error('Failed to clear AsyncStorage on logout:', error);
         }
     };
 

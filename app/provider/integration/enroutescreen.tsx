@@ -15,18 +15,19 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import { WebView } from "react-native-webview";
 import { markAsArrived } from "../../../src/api/booking.api";
 
 export default function EnRouteScreen() {
     const params = useLocalSearchParams();
     const router = useRouter();
-    const mapRef = useRef<MapView>(null);
+    const webViewRef = useRef<WebView>(null);
 
     const [providerLocation, setProviderLocation] = useState<{ latitude: number; longitude: number } | null>(null);
     const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
     const [distance, setDistance] = useState<string>("Calculating...");
     const [loading, setLoading] = useState(true);
+    const [mapHtml, setMapHtml] = useState<string>("");
 
     // Parse appointment data from params
     const appointmentId = params.appointmentId as string;
@@ -111,6 +112,74 @@ export default function EnRouteScreen() {
         }
     };
 
+    // Generate HTML for map with route
+    const generateMapHtml = (providerCoords: { latitude: number; longitude: number }, customerCoords: { latitude: number; longitude: number }) => {
+        const routeCoords = routeCoordinates.length > 0 
+            ? routeCoordinates.map(coord => `[${coord.latitude}, ${coord.longitude}]`).join(',')
+            : `[${providerCoords.latitude}, ${providerCoords.longitude}],[${customerCoords.latitude}, ${customerCoords.longitude}]`;
+
+        const html = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                <style>
+                    body { margin: 0; padding: 0; }
+                    #map { width: 100%; height: 100vh; }
+                </style>
+            </head>
+            <body>
+                <div id="map"></div>
+                <script>
+                    // Initialize map
+                    var map = L.map('map').setView([${(providerCoords.latitude + customerCoords.latitude) / 2}, ${(providerCoords.longitude + customerCoords.longitude) / 2}], 13);
+                    
+                    // Add OpenStreetMap tiles
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap contributors',
+                        maxZoom: 19
+                    }).addTo(map);
+
+                    // Custom provider marker icon (blue circle with arrow)
+                    var providerIcon = L.divIcon({
+                        className: 'custom-div-icon',
+                        html: "<div style='background-color:#00796B;width:40px;height:40px;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,0.3);'><svg width='24' height='24' viewBox='0 0 24 24' fill='white'><path d='M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z'/></svg></div>",
+                        iconSize: [40, 40],
+                        iconAnchor: [20, 20]
+                    });
+
+                    // Add provider marker (You)
+                    var providerMarker = L.marker([${providerCoords.latitude}, ${providerCoords.longitude}], {icon: providerIcon}).addTo(map);
+                    providerMarker.bindPopup('<b>You</b><br>Your Location');
+
+                    // Add customer marker
+                    var customerMarker = L.marker([${customerCoords.latitude}, ${customerCoords.longitude}]).addTo(map);
+                    customerMarker.bindPopup('<b>${customerName.replace(/'/g, "\\'")}</b><br>${serviceTitle.replace(/'/g, "\\'")}');
+
+                    // Draw route polyline
+                    var routeCoords = [${routeCoords}];
+                    if (routeCoords.length > 0) {
+                        var polyline = L.polyline(routeCoords, {
+                            color: '#00796B',
+                            weight: 4,
+                            opacity: 0.8
+                        }).addTo(map);
+                        
+                        // Fit map to show both markers and route
+                        map.fitBounds([
+                            [${providerCoords.latitude}, ${providerCoords.longitude}],
+                            [${customerCoords.latitude}, ${customerCoords.longitude}]
+                        ], {padding: [50, 50]});
+                    }
+                </script>
+            </body>
+            </html>
+        `;
+        setMapHtml(html);
+    };
+
     // Get provider location and watch for updates
     useEffect(() => {
         let locationSubscription: Location.LocationSubscription | null = null;
@@ -143,13 +212,8 @@ export default function EnRouteScreen() {
                 // Fetch route from OpenStreetMap
                 await fetchRoute(providerCoords, customerCoords);
 
-                // Fit map to show both markers
-                if (mapRef.current) {
-                    mapRef.current.fitToCoordinates([providerCoords, customerCoords], {
-                        edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
-                        animated: true,
-                    });
-                }
+                // Generate map HTML after fetching route
+                generateMapHtml(providerCoords, customerCoords);
 
                 setLoading(false);
 
@@ -168,7 +232,9 @@ export default function EnRouteScreen() {
                         setProviderLocation(newCoords);
 
                         // Update route when provider moves significantly
-                        fetchRoute(newCoords, customerCoords);
+                        fetchRoute(newCoords, customerCoords).then(() => {
+                            generateMapHtml(newCoords, customerCoords);
+                        });
                     }
                 );
             } catch (error) {
@@ -262,46 +328,21 @@ export default function EnRouteScreen() {
             </TouchableOpacity>
 
             {/* Map */}
-            <MapView
-                ref={mapRef}
-                style={styles.map}
-                initialRegion={{
-                    latitude: providerLocation.latitude,
-                    longitude: providerLocation.longitude,
-                    latitudeDelta: 0.05,
-                    longitudeDelta: 0.05,
-                }}
-                showsUserLocation={false}
-                showsMyLocationButton={false}
-            >
-                {/* Provider Marker */}
-                <Marker
-                    coordinate={providerLocation}
-                    title="You"
-                    description="Your Location"
-                >
-                    <View style={styles.providerMarker}>
-                        <Ionicons name="navigate" size={24} color="#fff" />
-                    </View>
-                </Marker>
-
-                {/* Customer Marker */}
-                <Marker
-                    coordinate={customerCoords}
-                    title={customerName}
-                    description={serviceTitle}
-                    pinColor="#F44336"
+            {mapHtml ? (
+                <WebView
+                    ref={webViewRef}
+                    style={styles.map}
+                    source={{ html: mapHtml }}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    startInLoadingState={true}
+                    scalesPageToFit={true}
                 />
-
-                {/* Route Polyline */}
-                {routeCoordinates.length > 0 && (
-                    <Polyline
-                        coordinates={routeCoordinates}
-                        strokeColor="#00796B"
-                        strokeWidth={4}
-                    />
-                )}
-            </MapView>
+            ) : (
+                <View style={styles.map}>
+                    <ActivityIndicator size="large" color="#00796B" />
+                </View>
+            )}
 
             {/* Bottom booking card */}
             <View style={styles.bottomPanel}>
