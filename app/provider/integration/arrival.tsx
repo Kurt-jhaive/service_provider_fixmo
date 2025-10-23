@@ -8,7 +8,7 @@ export default function ArrivalScreen() {
     </View>
   );
 }
-
+// test
 const styles = StyleSheet.create({
   container: {
     flex: 1,
