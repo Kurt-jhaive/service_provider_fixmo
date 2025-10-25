@@ -53,58 +53,58 @@ export default function ChatScreen() {
     const [replyingTo, setReplyingTo] = useState<Message | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [providerId, setProviderId] = useState<number | null>(null);
-    const [warrantyExpired, setWarrantyExpired] = useState(false);
 
-    // Check for user changes when screen is focused
+    // Check for user changes when screen is focused and ensure socket is connected
     useFocusEffect(
         useCallback(() => {
             checkUserAndRefresh();
+            ensureSocketConnected();
         }, [])
     );
 
     const checkUserAndRefresh = async () => {
         const storedProviderId = await AsyncStorage.getItem("provider_id");
         
-        // If logged out (no providerId), clear everything and go back
-        if (!storedProviderId) {
-            console.log('🚪 No provider ID found - user logged out, clearing chat');
-            setMessages([]);
-            setLoading(false);
-            
-            // Disconnect socket
-            if (socketRef.current) {
-                socketRef.current.removeAllListeners();
-                socketRef.current.disconnect();
-                socketRef.current = null;
-            }
-            
-            currentUserIdRef.current = null;
-            // Navigate back since user is logged out
-            router.back();
-            return;
-        }
-        
         // If user has changed, clear messages and reload
         if (currentUserIdRef.current !== null && currentUserIdRef.current !== storedProviderId) {
             console.log('🔄 Different user detected in chat, clearing messages');
-            console.log('   Previous user:', currentUserIdRef.current);
-            console.log('   New user:', storedProviderId);
-            
             setMessages([]);
             setLoading(true);
             
             // Disconnect old socket
             if (socketRef.current) {
-                socketRef.current.removeAllListeners();
                 socketRef.current.disconnect();
                 socketRef.current = null;
             }
+            
+            // Reset MessageService completely to clear any cached data
+            MessageService.reset();
+            console.log('🧹 MessageService reset for new user in chat');
             
             // Reinitialize for new user
             await initializeMessaging();
         }
         
         currentUserIdRef.current = storedProviderId;
+    };
+    
+    const ensureSocketConnected = () => {
+        console.log('🔍 Checking socket connection status...');
+        
+        if (!socketRef.current) {
+            console.log('⚠️ No socket reference, will be initialized');
+            return;
+        }
+        
+        const isConnected = socketRef.current.connected;
+        console.log(`🔌 Socket connected: ${isConnected}`);
+        
+        if (!isConnected) {
+            console.log('🔄 Socket disconnected, attempting to reconnect...');
+            socketRef.current.connect();
+        } else {
+            console.log('✅ Socket already connected');
+        }
     };
 
     useEffect(() => {
@@ -143,13 +143,18 @@ export default function ChatScreen() {
                 setProviderId(parseInt(storedProviderId));
             }
 
-            // Initialize MessageService
+            // Initialize MessageService - always reset and create fresh instance to ensure no cache
             let messageAPI = MessageService.getInstance();
             if (!messageAPI) {
+                console.log('🚀 Creating new MessageService instance for chat');
                 messageAPI = MessageService.initialize(token);
+            } else {
+                // Update token in existing instance
+                console.log('🔄 Updating token in existing MessageService instance');
+                MessageService.updateToken(token);
             }
 
-            // Fetch initial messages
+            // Fetch initial messages for THIS user
             await fetchMessages();
 
             // Setup Socket.IO for real-time updates
@@ -161,19 +166,39 @@ export default function ChatScreen() {
     };
 
     const setupSocketIO = (messageAPI: any, userId: number) => {
-        console.log('🔌 Setting up Socket.IO...');
+        console.log('🔌 Setting up Socket.IO for conversation:', conversationId);
         
-        // Create Socket.IO connection
-        const socket = messageAPI.createSocketIOConnection();
+        // Get existing socket or create new one
+        let socket = MessageService.getSocket();
+        
+        if (socket && socket.connected) {
+            console.log('♻️ Reusing existing connected socket');
+            // Remove old listeners first to avoid duplicates
+            socket.removeAllListeners('new_message');
+            socket.removeAllListeners('message_read');
+        } else {
+            console.log('🆕 Creating new Socket.IO connection');
+            // Create Socket.IO connection
+            socket = messageAPI.createSocketIOConnection();
+            if (socket) {
+                MessageService.setSocket(socket);
+            }
+        }
+        
+        if (!socket) {
+            console.error('❌ Failed to create or get socket');
+            return;
+        }
+        
         socketRef.current = socket;
-
-        // Store socket in service
-        MessageService.setSocket(socket);
 
         // Connection events
         socket.on('connect', () => {
-            console.log('✅ Socket connected');
+            console.log('✅ Socket connected, ID:', socket?.id);
             setIsConnected(true);
+            
+            // Don't join here - wait for authentication first
+            console.log('⏳ Waiting for authentication before joining conversation...');
         });
 
         socket.on('disconnect', () => {
@@ -183,24 +208,48 @@ export default function ChatScreen() {
 
         socket.on('authenticated', (data: any) => {
             console.log('✅ Socket authenticated:', data);
-            // Join this conversation room
+            // NOW join this conversation room after authentication
+            console.log('🚪 Joining conversation after authentication:', conversationId);
             messageAPI.joinConversation(socket, conversationId, userId, 'provider');
         });
 
         socket.on('joined_conversation', (data: any) => {
-            console.log('✅ Joined conversation:', data);
+            console.log('✅ Successfully joined conversation:', data.conversationId || data);
+        });
+        
+        // Handle reconnection - wait for authentication before rejoining
+        socket.on('reconnect', () => {
+            console.log('🔄 Socket reconnected, waiting for authentication...');
+            // Don't join immediately - wait for 'authenticated' event
+            // The 'authenticated' handler above will rejoin the conversation
         });
 
         // Listen for new messages
         socket.on('new_message', (data: any) => {
-            console.log('📨 New message received:', data);
-            if (data.message && data.message.conversation_id === conversationId) {
+            console.log('📨 Raw new_message event data:', data);
+            
+            // Backend might send message directly or wrapped in data.message
+            const message = data.message || data;
+            
+            console.log('📨 Extracted message:', {
+                hasMessage: !!message,
+                messageConvId: message?.conversation_id,
+                currentConvId: conversationId,
+                messageId: message?.message_id,
+                content: message?.content,
+                senderType: message?.sender_type
+            });
+            
+            if (message && message.conversation_id === conversationId) {
+                console.log('✅ Message is for this conversation, adding to state');
                 setMessages((prev) => {
                     // Avoid duplicates
-                    if (prev.some(msg => msg.message_id === data.message.message_id)) {
+                    if (prev.some(msg => msg.message_id === message.message_id)) {
+                        console.log('⚠️ Duplicate message detected, skipping');
                         return prev;
                     }
-                    return [...prev, data.message];
+                    console.log('✅ Adding new message to chat');
+                    return [...prev, message];
                 });
 
                 // Auto-scroll to bottom
@@ -209,9 +258,11 @@ export default function ChatScreen() {
                 }, 100);
 
                 // Auto-mark as read if from customer
-                if (data.message.sender_type === 'customer') {
-                    markSingleMessageAsRead(data.message.message_id);
+                if (message.sender_type === 'customer') {
+                    markSingleMessageAsRead(message.message_id);
                 }
+            } else {
+                console.log('⚠️ Message is NOT for this conversation, ignoring');
             }
         });
 
@@ -235,29 +286,28 @@ export default function ChatScreen() {
         });
 
         socket.on('join_conversation_failed', (error: any) => {
-            // Handle different failure reasons gracefully
-            if (error.reason === 'expired' || error.error?.includes('warranty period has expired')) {
-                console.log('⏰ Conversation warranty period has expired - read-only mode');
-                setWarrantyExpired(true);
-                // Don't show error alert for expired warranties - this is expected
-                // The conversation is still viewable but no new messages can be sent
-                return;
-            }
-            
-            if (error.reason === 'not_found') {
-                console.warn('⚠️ Conversation not found:', error.conversationId);
-                Alert.alert('Error', 'This conversation no longer exists.');
-                return;
-            }
-            
-            if (error.reason === 'unauthorized') {
-                console.warn('⚠️ Unauthorized access to conversation');
-                Alert.alert('Error', 'You do not have access to this conversation.');
-                return;
-            }
-            
-            // Log other errors as warnings
-            console.warn('⚠️ Failed to join conversation:', error);
+            console.error('❌ Failed to join conversation:', error);
+        });
+        
+        // Connection error handling
+        socket.on('connect_error', (error: any) => {
+            console.error('❌ Socket connection error:', error.message);
+        });
+        
+        socket.on('error', (error: any) => {
+            console.error('❌ Socket error:', error);
+        });
+        
+        socket.on('reconnect_attempt', (attemptNumber: number) => {
+            console.log('🔄 Socket reconnection attempt:', attemptNumber);
+        });
+        
+        socket.on('reconnect_error', (error: any) => {
+            console.error('❌ Socket reconnection error:', error);
+        });
+        
+        socket.on('reconnect_failed', () => {
+            console.error('❌ Socket reconnection failed after max attempts');
         });
     };
 
@@ -661,13 +711,6 @@ export default function ChatScreen() {
                         <Ionicons name="lock-closed-outline" size={18} color="#6c757d" style={{ marginRight: 8 }} />
                         <Text style={styles.readOnlyInputText}>
                             Messaging disabled for completed appointments
-                        </Text>
-                    </View>
-                ) : warrantyExpired ? (
-                    <View style={styles.readOnlyInputContainer}>
-                        <Ionicons name="time-outline" size={18} color="#FF9800" style={{ marginRight: 8 }} />
-                        <Text style={styles.readOnlyInputText}>
-                            Warranty period has expired - messages are read-only
                         </Text>
                     </View>
                 ) : (

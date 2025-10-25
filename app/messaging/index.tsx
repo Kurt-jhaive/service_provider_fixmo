@@ -46,40 +46,22 @@ export default function MessagesListScreen() {
     const checkUserAndRefresh = async () => {
         const providerId = await AsyncStorage.getItem("provider_id");
         
-        // If logged out (no providerId), clear everything
-        if (!providerId) {
-            console.log('🚪 No provider ID found - user logged out, clearing all data');
-            setConversations([]);
-            setFilteredConversations([]);
-            setLoading(false);
-            
-            // Disconnect socket
-            if (socketRef.current) {
-                socketRef.current.removeAllListeners();
-                socketRef.current.disconnect();
-                socketRef.current = null;
-            }
-            
-            currentUserIdRef.current = null;
-            return;
-        }
-        
         // If user has changed, clear conversations and reload
         if (currentUserIdRef.current !== null && currentUserIdRef.current !== providerId) {
             console.log('🔄 Different user detected, clearing conversations');
-            console.log('   Previous user:', currentUserIdRef.current);
-            console.log('   New user:', providerId);
-            
             setConversations([]);
             setFilteredConversations([]);
             setLoading(true);
             
             // Disconnect old socket
             if (socketRef.current) {
-                socketRef.current.removeAllListeners();
                 socketRef.current.disconnect();
                 socketRef.current = null;
             }
+            
+            // Reset MessageService completely to clear any cached data
+            MessageService.reset();
+            console.log('🧹 MessageService reset for new user in conversations list');
             
             // Reinitialize for new user
             await initializeMessaging();
@@ -133,13 +115,18 @@ export default function MessagesListScreen() {
             return;
         }
 
-        // Initialize MessageService
+        // Initialize MessageService - always reset and create fresh instance to ensure no cache
         let messageAPI = MessageService.getInstance();
         if (!messageAPI) {
+            console.log('🚀 Creating new MessageService instance for conversations');
             messageAPI = MessageService.initialize(token);
+        } else {
+            // Update token in existing instance
+            console.log('🔄 Updating token in existing MessageService instance');
+            MessageService.updateToken(token);
         }
 
-        // Fetch conversations
+        // Fetch conversations for THIS user
         await fetchConversations();
 
         // Setup Socket.IO for real-time updates
@@ -149,20 +136,17 @@ export default function MessagesListScreen() {
     const setupSocketIO = (messageAPI: any, userId: number) => {
         console.log('🔌 Setting up Socket.IO for conversations list...');
         
-        // Create or reuse Socket.IO connection
-        let socket = MessageService.getSocket();
-        if (!socket || !socket.connected) {
-            socket = messageAPI.createSocketIOConnection();
-            if (socket) {
-                MessageService.setSocket(socket);
-            }
-        }
+        // Always create a fresh Socket.IO connection for safety
+        // Don't reuse old connections that might have stale data
+        const socket = messageAPI.createSocketIOConnection();
         
         if (!socket) {
             console.error('Failed to create socket connection');
             return;
         }
         
+        // Store the new socket
+        MessageService.setSocket(socket);
         socketRef.current = socket;
 
         // Connection events
@@ -262,7 +246,9 @@ export default function MessagesListScreen() {
                     provider_id: data[0].provider_id,
                     has_customer: !!data[0].customer,
                     customer_name: data[0].customer ? `${data[0].customer.first_name} ${data[0].customer.last_name}` : 'N/A',
-                    status: data[0].status
+                    status: data[0].status,
+                    unread_count: data[0].unread_count,
+                    last_message: data[0].last_message
                 });
             }
             
@@ -406,6 +392,17 @@ export default function MessagesListScreen() {
         const unreadCount = item.unread_count || 0;
         const timestamp = formatTimestamp(item.last_message_at || item.updated_at);
         const isUnread = unreadCount > 0;
+
+        // Debug logging for unread count
+        if (unreadCount > 0) {
+            console.log('📬 Conversation with unread messages:', {
+                conversation_id: item.conversation_id,
+                customer_name: customerName,
+                unread_count: unreadCount,
+                raw_unread_count: item.unread_count,
+                last_message: lastMessage
+            });
+        }
 
         return (
             <TouchableOpacity

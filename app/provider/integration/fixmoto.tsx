@@ -312,6 +312,10 @@ export default function FixMoToday() {
             if (existingConversation && existingConversation.conversation_id) {
                 // Route to existing conversation
                 console.log('✅ Navigating to existing conversation:', existingConversation.conversation_id);
+                
+                // Extract customer photo from conversation data if available
+                const customerPhoto = existingConversation.customer?.profile_photo || '';
+                
                 router.push({
                     pathname: '/messaging/chat',
                     params: {
@@ -319,7 +323,7 @@ export default function FixMoToday() {
                         customerId: customerId.toString(),
                         customerName: clientName,
                         customerPhone: clientPhone,
-                        customerPhoto: '', // Customer type doesn't include profile_photo
+                        customerPhoto: customerPhoto,
                         appointmentStatus: appointment.appointment_status || 'active',
                     }
                 });
@@ -350,22 +354,31 @@ export default function FixMoToday() {
                 const createData = await createResponse.json();
                 console.log('📦 Create conversation response:', createData);
                 
+                // Handle different response formats from server
+                // Server may return: { data: { conversation_id } } or { conversation: { conversation_id } }
+                const conversationData = createData.data || createData.conversation || createData;
+                const conversationId = conversationData.conversation_id;
+                
                 // Validate response data
-                if (!createData || !createData.conversation || !createData.conversation.conversation_id) {
+                if (!conversationId) {
                     console.error('❌ Invalid conversation data:', createData);
                     throw new Error('Invalid conversation data received from server');
                 }
                 
+                // Extract customer data for navigation
+                const customerData = conversationData.customer || appointment.customer;
+                const customerPhoto = customerData?.profile_photo || '';
+                
                 // Route to new conversation
-                console.log('✅ Navigating to new conversation:', createData.conversation.conversation_id);
+                console.log('✅ Navigating to new conversation:', conversationId);
                 router.push({
                     pathname: '/messaging/chat',
                     params: {
-                        conversationId: createData.conversation.conversation_id.toString(),
+                        conversationId: conversationId.toString(),
                         customerId: customerId.toString(),
                         customerName: clientName,
                         customerPhone: clientPhone,
-                        customerPhoto: '', // Customer type doesn't include profile_photo
+                        customerPhoto: customerPhoto,
                         appointmentStatus: appointment.appointment_status || 'active',
                     }
                 });
