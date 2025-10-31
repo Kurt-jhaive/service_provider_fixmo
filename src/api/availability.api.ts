@@ -307,4 +307,54 @@ export const deleteAvailability = async (
     throw new Error(error.message || 'Network error. Please try again.');
   }
 };
- 
+
+/**
+ * Toggle individual time slot availability (enable/disable)
+ * @param availabilityId - The ID of the availability slot to toggle
+ * @param slotIsActive - Whether to enable or disable the slot
+ * @param token - JWT authentication token
+ */
+export const toggleTimeSlot = async (
+  availabilityId: number,
+  slotIsActive: boolean,
+  token: string
+): Promise<Availability> => {
+  try {
+    console.log(`Toggling time slot ${availabilityId} to ${slotIsActive ? 'active' : 'inactive'}`);
+    
+    const response = await fetch(
+      `${API_CONFIG.BASE_URL}/api/availability/toggle-slot/${availabilityId}`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          slot_isActive: slotIsActive,
+        }),
+      }
+    );
+
+    const data: AvailabilityResponse = await response.json();
+    console.log('Toggle time slot response:', JSON.stringify(data));
+
+    if (!response.ok || !data.success) {
+      // Handle 409 Conflict (has active appointments)
+      if (response.status === 409) {
+        const conflictMessage = data.message || 'Cannot deactivate time slot with active appointments';
+        throw new Error(conflictMessage);
+      }
+      throw new Error(data.message || 'Failed to toggle time slot');
+    }
+
+    if (!data.data) {
+      throw new Error('No availability data received');
+    }
+
+    return data.data;
+  } catch (error: any) {
+    console.error('Toggle Time Slot Error:', error);
+    throw new Error(error.message || 'Network error. Please try again.');
+  }
+};

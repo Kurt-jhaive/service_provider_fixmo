@@ -44,7 +44,10 @@ export default function ChatScreen() {
     const customerPhone = params.customerPhone as string;
     const customerPhoto = params.customerPhoto as string;
     const appointmentStatus = params.appointmentStatus as string;
-    const isReadOnly = appointmentStatus === 'completed';
+    
+    // Check if appointment is closed (completed, cancelled, no-show)
+    const isAppointmentClosed = ['completed', 'cancelled', 'no-show'].includes(appointmentStatus?.toLowerCase() || '');
+    const isReadOnly = isAppointmentClosed;
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(true);
@@ -89,6 +92,12 @@ export default function ChatScreen() {
     };
     
     const ensureSocketConnected = () => {
+        // Skip socket connection check for closed appointments
+        if (isAppointmentClosed) {
+            console.log('📜 Appointment is closed - skipping socket connection check');
+            return;
+        }
+        
         console.log('🔍 Checking socket connection status...');
         
         if (!socketRef.current) {
@@ -143,6 +152,16 @@ export default function ChatScreen() {
                 setProviderId(parseInt(storedProviderId));
             }
 
+            // Fetch initial messages
+            await fetchMessages();
+
+            // Skip socket connection if appointment is closed (view-only mode)
+            if (isAppointmentClosed) {
+                console.log('📜 Appointment is closed - loading messages in view-only mode (no socket connection)');
+                setLoading(false);
+                return;
+            }
+
             // Initialize MessageService - always reset and create fresh instance to ensure no cache
             let messageAPI = MessageService.getInstance();
             if (!messageAPI) {
@@ -154,10 +173,7 @@ export default function ChatScreen() {
                 MessageService.updateToken(token);
             }
 
-            // Fetch initial messages for THIS user
-            await fetchMessages();
-
-            // Setup Socket.IO for real-time updates
+            // Setup Socket.IO for real-time updates (only for active appointments)
             setupSocketIO(messageAPI, parseInt(storedProviderId || '0'));
         } catch (error: any) {
             console.error('Initialization error:', error);
@@ -699,7 +715,7 @@ export default function ChatScreen() {
                         <View style={styles.readOnlyContent}>
                             <Ionicons name="lock-closed" size={16} color="#856404" style={{ marginRight: 8 }} />
                             <Text style={styles.readOnlyText}>
-                                This conversation is read-only (Appointment completed)
+                                This conversation is read-only (Appointment {appointmentStatus || 'closed'})
                             </Text>
                         </View>
                     </View>
@@ -710,7 +726,7 @@ export default function ChatScreen() {
                     <View style={styles.readOnlyInputContainer}>
                         <Ionicons name="lock-closed-outline" size={18} color="#6c757d" style={{ marginRight: 8 }} />
                         <Text style={styles.readOnlyInputText}>
-                            Messaging disabled for completed appointments
+                            Messaging disabled for {appointmentStatus || 'closed'} appointments
                         </Text>
                     </View>
                 ) : (

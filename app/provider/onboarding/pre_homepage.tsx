@@ -435,7 +435,7 @@ export default function Homepage() {
                                 </View>
                                 <Text style={styles.availabilityNote}>
                                     <Ionicons name="checkmark-circle" size={14} color="#00796B" />{' '}
-                                    {availabilities.filter((av) => av.availability_isActive).length} days active
+                                    {availabilities.filter((av) => av.availability_isActive).length} time slots active
                                 </Text>
                             </View>
                         ) : (

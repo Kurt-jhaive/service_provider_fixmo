@@ -8,9 +8,10 @@ import { useUserContext } from "@/context/UserContext";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
+    Animated,
     BackHandler,
     Image,
     RefreshControl,
@@ -36,6 +37,7 @@ export default function RatingScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [filterValue, setFilterValue] = useState<number | null>(null); // null = All ratings
+    const scrollY = useRef(new Animated.Value(0)).current;
 
     // Prevent going back to OTP screen - navigate to profile instead
     useFocusEffect(
@@ -270,6 +272,19 @@ export default function RatingScreen() {
         );
     }
 
+    // Animated header opacity and height
+    const headerHeight = scrollY.interpolate({
+        inputRange: [0, 200],
+        outputRange: [1, 0],
+        extrapolate: 'clamp',
+    });
+
+    const headerOpacity = scrollY.interpolate({
+        inputRange: [0, 150],
+        outputRange: [1, 0],
+        extrapolate: 'clamp',
+    });
+
     return (
         <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
             {/* Back Button */}
@@ -280,57 +295,86 @@ export default function RatingScreen() {
                 <Ionicons name="arrow-back" size={24} color="#333" />
             </TouchableOpacity>
 
-            {/* Fixed Header */}
-            <View style={styles.headerContainer}>
+            {/* Fixed Title */}
+            <View style={styles.fixedTitleContainer}>
                 <Text style={styles.header}>Ratings & Reviews</Text>
-                
-                {statistics && statistics.average_rating !== undefined && (
-                    <>
-                        <Text style={styles.overallLabel}>Overall Rating</Text>
-                        <Text style={styles.overallScore}>
-                            {(statistics.average_rating || 0).toFixed(1)}
-                        </Text>
-                        <View style={styles.starsCenter}>
-                            {renderStars(statistics.average_rating || 0)}
-                        </View>
-                        <Text style={styles.totalReviews}>
-                            {statistics.total_ratings || 0} total review{(statistics.total_ratings || 0) !== 1 ? 's' : ''}
-                        </Text>
+            </View>
 
-                        {/* Rating Distribution */}
-                        {statistics.rating_distribution && statistics.rating_distribution.length > 0 && (
-                            <View style={styles.distributionContainer}>
-                                {statistics.rating_distribution
-                                    .sort((a, b) => b.star - a.star)
-                                    .map((dist) => {
-                                        const totalRatings = statistics.total_ratings || 1; // Prevent division by zero
-                                        const percentage = (dist.count / totalRatings) * 100;
-                                        
-                                        return (
-                                            <View key={dist.star} style={styles.distributionRow}>
-                                                <Text style={styles.distributionStar}>
-                                                    {dist.star} ⭐
-                                                </Text>
-                                                <View style={styles.distributionBar}>
-                                                    <View 
-                                                        style={[
-                                                            styles.distributionFill,
-                                                            { 
-                                                                width: `${Math.min(percentage, 100)}%` 
-                                                            }
-                                                        ]} 
-                                                    />
-                                                </View>
-                                                <Text style={styles.distributionCount}>
-                                                    {dist.count}
-                                                </Text>
-                                            </View>
-                                        );
-                                    })}
-                            </View>
-                        )}
-                    </>
+            {/* Scrollable Content */}
+            <Animated.ScrollView 
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
+                        colors={['#008080']}
+                        tintColor="#008080"
+                    />
+                }
+                onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                    { useNativeDriver: false }
                 )}
+                scrollEventThrottle={16}
+            >
+                {/* Collapsible Statistics Header */}
+                <Animated.View 
+                    style={[
+                        styles.statisticsContainer,
+                        {
+                            opacity: headerOpacity,
+                            transform: [{ scale: headerHeight }],
+                        }
+                    ]}
+                >
+                    {statistics && statistics.average_rating !== undefined && (
+                        <>
+                            <Text style={styles.overallLabel}>Overall Rating</Text>
+                            <Text style={styles.overallScore}>
+                                {(statistics.average_rating || 0).toFixed(1)}
+                            </Text>
+                            <View style={styles.starsCenter}>
+                                {renderStars(statistics.average_rating || 0)}
+                            </View>
+                            <Text style={styles.totalReviews}>
+                                {statistics.total_ratings || 0} total review{(statistics.total_ratings || 0) !== 1 ? 's' : ''}
+                            </Text>
+
+                            {/* Rating Distribution */}
+                            {statistics.rating_distribution && statistics.rating_distribution.length > 0 && (
+                                <View style={styles.distributionContainer}>
+                                    {statistics.rating_distribution
+                                        .sort((a, b) => b.star - a.star)
+                                        .map((dist) => {
+                                            const totalRatings = statistics.total_ratings || 1;
+                                            const percentage = (dist.count / totalRatings) * 100;
+                                            
+                                            return (
+                                                <View key={dist.star} style={styles.distributionRow}>
+                                                    <Text style={styles.distributionStar}>
+                                                        {dist.star} ⭐
+                                                    </Text>
+                                                    <View style={styles.distributionBar}>
+                                                        <View 
+                                                            style={[
+                                                                styles.distributionFill,
+                                                                { 
+                                                                    width: `${Math.min(percentage, 100)}%` 
+                                                                }
+                                                            ]} 
+                                                        />
+                                                    </View>
+                                                    <Text style={styles.distributionCount}>
+                                                        {dist.count}
+                                                    </Text>
+                                                </View>
+                                            );
+                                        })}
+                                </View>
+                            )}
+                        </>
+                    )}
+                </Animated.View>
 
                 {/* Filter Section */}
                 <View style={styles.filterContainer}>
@@ -381,20 +425,7 @@ export default function RatingScreen() {
                 </View>
 
                 <Text style={styles.sectionTitle}>Customer Reviews</Text>
-            </View>
 
-            {/* Scrollable Content */}
-            <ScrollView 
-                contentContainerStyle={styles.scrollContent}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={handleRefresh}
-                        colors={['#008080']}
-                        tintColor="#008080"
-                    />
-                }
-            >
                 {ratings.length === 0 ? (
                     <View style={styles.emptyContainer}>
                         <Ionicons name="star-outline" size={64} color="#CCC" />
@@ -496,7 +527,7 @@ export default function RatingScreen() {
                         )}
                     </>
                 )}
-            </ScrollView>
+            </Animated.ScrollView>
         </SafeAreaView>
     );
 }
@@ -520,6 +551,19 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
         elevation: 3,
     },
+    fixedTitleContainer: {
+        paddingHorizontal: 20,
+        paddingTop: 20,
+        paddingBottom: 8,
+        backgroundColor: "#fff",
+        borderBottomWidth: 1,
+        borderBottomColor: "#E0E0E0",
+    },
+    statisticsContainer: {
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        backgroundColor: "#fff",
+    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -532,70 +576,58 @@ const styles = StyleSheet.create({
         color: '#666',
         fontFamily: 'PoppinsRegular',
     },
-    headerContainer: {
-        paddingHorizontal: 20,
-        paddingTop: 40,
-        paddingBottom: 10,
-        backgroundColor: "#fff",
-        zIndex: 1,
-        elevation: 2,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-    },
     scrollContent: {
         padding: 20,
         paddingBottom: 40,
     },
     header: {
-        fontSize: 22,
+        fontSize: 16,
         fontFamily: "PoppinsSemiBold",
         color: "#008080",
         textAlign: "center",
-        marginBottom: 10,
+        marginBottom: 0,
     },
     overallLabel: {
-        fontSize: 14,
+        fontSize: 12,
         color: "#666",
         fontFamily: "PoppinsRegular",
-        marginBottom: 4,
+        marginBottom: 2,
         textAlign: "center",
     },
     overallScore: {
-        fontSize: 48,
+        fontSize: 32,
         color: "#FFA500",
         fontFamily: "PoppinsBold",
         textAlign: "center",
     },
     totalReviews: {
-        marginTop: 5,
+        marginTop: 2,
         color: "#666",
-        fontSize: 14,
+        fontSize: 12,
         fontFamily: "PoppinsRegular",
         textAlign: "center",
     },
     distributionContainer: {
-        marginTop: 16,
-        paddingVertical: 8,
+        marginTop: 12,
+        paddingVertical: 6,
     },
     distributionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 8,
-        gap: 8,
+        marginBottom: 6,
+        gap: 6,
     },
     distributionStar: {
-        fontSize: 14,
+        fontSize: 12,
         fontFamily: 'PoppinsMedium',
         color: '#333',
-        width: 50,
+        width: 40,
     },
     distributionBar: {
         flex: 1,
-        height: 8,
+        height: 6,
         backgroundColor: '#E0E0E0',
-        borderRadius: 4,
+        borderRadius: 3,
         overflow: 'hidden',
     },
     distributionFill: {
@@ -603,16 +635,17 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFD700',
     },
     distributionCount: {
-        fontSize: 12,
+        fontSize: 11,
         fontFamily: 'PoppinsRegular',
         color: '#666',
-        width: 30,
+        width: 25,
         textAlign: 'right',
     },
     sectionTitle: {
         fontSize: 18,
         fontFamily: "PoppinsSemiBold",
-        marginTop: 20,
+        marginTop: 12,
+        marginBottom: 4,
         color: "#333",
     },
     starRow: {
@@ -626,14 +659,14 @@ const styles = StyleSheet.create({
         marginBottom: 6,
     },
     filterContainer: {
-        marginTop: 20,
-        marginBottom: 10,
+        marginTop: 12,
+        marginBottom: 8,
     },
     filterLabel: {
-        fontSize: 14,
+        fontSize: 13,
         fontFamily: "PoppinsSemiBold",
         color: "#333",
-        marginBottom: 12,
+        marginBottom: 8,
     },
     filterScrollContent: {
         flexDirection: "row",

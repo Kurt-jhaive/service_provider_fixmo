@@ -4,19 +4,19 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFonts } from 'expo-font';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
-import { addTimeRangeAvailability, deleteAvailability, getProviderAvailability, toggleDayAvailability } from '../../src/api/availability.api';
+import { addTimeRangeAvailability, deleteAvailability, getProviderAvailability, toggleDayAvailability, toggleTimeSlot } from '../../src/api/availability.api';
 import ApprovedScreenWrapper from '../../src/navigation/ApprovedScreenWrapper';
 import type { Availability, DayOfWeek } from '../../src/types/availability';
 
@@ -272,6 +272,20 @@ export default function AvailabilityScreen() {
       return;
     }
 
+    // Calculate duration in minutes
+    const durationInMinutes = Math.floor((endTime.getTime() - startTime.getTime()) / 60000);
+    const minimumDuration = 3 * 60; // 3 hours = 180 minutes
+
+    // Validate minimum duration (3 hours)
+    if (durationInMinutes < minimumDuration) {
+      Alert.alert(
+        'Invalid Duration',
+        `Time slot must be at least 3 hours long. Current duration: ${Math.floor(durationInMinutes / 60)} hours ${durationInMinutes % 60} minutes.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     // Final check for overlap (should not happen with auto-adjustment)
     if (checkTimeOverlap(selectedDay, startStr, endStr)) {
       Alert.alert(
@@ -349,6 +363,40 @@ export default function AvailabilityScreen() {
       ...prev,
       [day]: !prev[day],
     }));
+  };
+
+  // Handle toggling individual time slot
+  const handleToggleTimeSlot = async (slot: Availability, newValue: boolean) => {
+    try {
+      const token = await AsyncStorage.getItem('providerToken');
+      if (!token) {
+        Alert.alert('Error', 'Authentication required');
+        return;
+      }
+
+      await toggleTimeSlot(slot.availability_id!, newValue, token);
+      
+      // Update local state immediately for better UX
+      setAvailabilities(prev => 
+        prev.map(a => 
+          a.availability_id === slot.availability_id 
+            ? { ...a, slot_isActive: newValue }
+            : a
+        )
+      );
+
+      // Optionally show success message
+      // Alert.alert('Success', `Time slot ${newValue ? 'enabled' : 'disabled'}`);
+    } catch (error: any) {
+      // Revert optimistic update on error
+      fetchAvailability();
+      
+      Alert.alert(
+        newValue ? 'Cannot Enable' : 'Cannot Disable',
+        error.message || 'Failed to toggle time slot',
+        [{ text: 'OK' }]
+      );
+    }
   };
 
   // Toggle entire day availability on/off
@@ -494,31 +542,49 @@ export default function AvailabilityScreen() {
                         key={slot.availability_id} 
                         style={[
                           styles.timeSlotCard,
-                          !slot.availability_isActive && styles.timeSlotCardInactive
+                          !slot.slot_isActive && styles.timeSlotCardInactive
                         ]}
                       >
                         <View style={styles.timeSlotInfo}>
                           <Ionicons 
                             name="time-outline" 
                             size={20} 
-                            color={slot.availability_isActive ? '#00796B' : '#999'} 
+                            color={slot.slot_isActive ? '#00796B' : '#999'} 
                           />
-                          <Text style={[
-                            styles.timeSlotText,
-                            !slot.availability_isActive && styles.timeSlotTextInactive
-                          ]}>
-                            {slot.startTime} - {slot.endTime}
-                          </Text>
-                          {!slot.availability_isActive && (
-                            <Text style={styles.inactiveBadge}>Disabled</Text>
-                          )}
+                          <View style={styles.timeSlotTextContainer}>
+                            <Text style={[
+                              styles.timeSlotText,
+                              !slot.slot_isActive && styles.timeSlotTextInactive
+                            ]}>
+                              {slot.startTime} - {slot.endTime}
+                            </Text>
+                            {!slot.slot_isActive && (
+                              <Text style={styles.inactiveBadge}>Disabled</Text>
+                            )}
+                          </View>
                         </View>
-                        <TouchableOpacity
-                          onPress={() => handleDeleteTimeSlot(slot)}
-                          style={styles.deleteButton}
-                        >
-                          <Ionicons name="trash-outline" size={20} color="#E53935" />
-                        </TouchableOpacity>
+                        
+                        <View style={styles.timeSlotActions}>
+                          {/* Individual Slot Toggle */}
+                          <View style={styles.slotToggleContainer}>
+                            <Switch
+                              value={slot.slot_isActive ?? true}
+                              onValueChange={(value) => handleToggleTimeSlot(slot, value)}
+                              trackColor={{ false: '#E0E0E0', true: '#80CBC4' }}
+                              thumbColor={slot.slot_isActive ? '#00796B' : '#f4f3f4'}
+                              ios_backgroundColor="#E0E0E0"
+                              disabled={!slot.availability_isActive}
+                            />
+                          </View>
+                          
+                          {/* Delete Button */}
+                          <TouchableOpacity
+                            onPress={() => handleDeleteTimeSlot(slot)}
+                            style={styles.deleteButton}
+                          >
+                            <Ionicons name="trash-outline" size={20} color="#E53935" />
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     ))}
 
@@ -778,12 +844,16 @@ const styles = StyleSheet.create({
   timeSlotInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+  },
+  timeSlotTextContainer: {
+    flex: 1,
+    marginLeft: 8,
   },
   timeSlotText: {
     fontSize: 14,
     fontFamily: 'PoppinsMedium',
     color: '#333',
-    marginLeft: 8,
   },
   timeSlotCardInactive: {
     opacity: 0.6,
@@ -791,6 +861,14 @@ const styles = StyleSheet.create({
   },
   timeSlotTextInactive: {
     color: '#999',
+  },
+  timeSlotActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  slotToggleContainer: {
+    marginRight: 8,
   },
   inactiveBadge: {
     fontSize: 10,
@@ -800,7 +878,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 4,
-    marginLeft: 8,
+    marginTop: 2,
+    alignSelf: 'flex-start',
   },
   deleteButton: {
     padding: 4,
