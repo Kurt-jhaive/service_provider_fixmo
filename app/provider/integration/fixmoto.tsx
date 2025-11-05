@@ -195,7 +195,99 @@ export default function FixMoToday() {
         setExpandedCard(expandedCard === id ? null : id);
     };
 
+    /**
+     * Check if appointment is late or overdue
+     * @returns 'on-time' | 'late' | 'overdue'
+     */
+    const checkAppointmentTiming = (appointment: Appointment): 'on-time' | 'late' | 'overdue' => {
+        console.log('🕐 Checking appointment timing...');
+        console.log('📅 Scheduled date:', appointment.scheduled_date);
+        console.log('⏰ Start time:', appointment.availability?.startTime);
+        console.log('⏰ End time:', appointment.availability?.endTime);
+        
+        if (!appointment.scheduled_date || !appointment.availability?.startTime || !appointment.availability?.endTime) {
+            console.log('⚠️ Missing time data, defaulting to on-time');
+            return 'on-time'; // Default if no time data
+        }
+
+        try {
+            const now = new Date();
+            const appointmentDate = parseISO(appointment.scheduled_date);
+            
+            console.log('📍 Current time:', now.toLocaleString());
+            console.log('📍 Appointment date:', appointmentDate.toLocaleDateString());
+            
+            // Parse start and end times (format: "HH:mm")
+            const [startHour, startMinute] = appointment.availability.startTime.split(':').map(Number);
+            const [endHour, endMinute] = appointment.availability.endTime.split(':').map(Number);
+            
+            // Create datetime objects for start and end
+            const startDateTime = new Date(appointmentDate);
+            startDateTime.setHours(startHour, startMinute, 0, 0);
+            
+            const endDateTime = new Date(appointmentDate);
+            endDateTime.setHours(endHour, endMinute, 0, 0);
+            
+            console.log('⏰ Start DateTime:', startDateTime.toLocaleString());
+            console.log('⏰ End DateTime:', endDateTime.toLocaleString());
+            
+            // Check timing status
+            if (now < startDateTime) {
+                console.log('✅ Status: ON-TIME (before start)');
+                return 'on-time'; // Before scheduled start time
+            } else if (now >= startDateTime && now <= endDateTime) {
+                console.log('⚠️ Status: LATE (after start, before end)');
+                return 'late'; // After start but before end - can still start with warning
+            } else {
+                console.log('❌ Status: OVERDUE (past end time)');
+                return 'overdue'; // Past end time - cannot start
+            }
+        } catch (error) {
+            console.error('❌ Error checking appointment timing:', error);
+            return 'on-time'; // Default to on-time if error
+        }
+    };
+
     const handleEnRoute = async (appointment: Appointment) => {
+        // Check if appointment is overdue or late
+        const timingStatus = checkAppointmentTiming(appointment);
+        const startTime = appointment.availability?.startTime || '';
+        const endTime = appointment.availability?.endTime || '';
+        
+        // If overdue, prevent starting
+        if (timingStatus === 'overdue') {
+            Alert.alert(
+                'Appointment Overdue',
+                `This appointment was scheduled for ${startTime} - ${endTime}. The appointment is now overdue and cannot be started.`,
+                [
+                    {
+                        text: 'OK',
+                    },
+                ]
+            );
+            return;
+        }
+        
+        // If late, show warning but allow to continue
+        if (timingStatus === 'late') {
+            Alert.alert(
+                'Late Start Warning',
+                `This appointment was scheduled to start at ${startTime}. Starting late may affect your Fix-Score. Do you want to continue?`,
+                [
+                    {
+                        text: 'Cancel',
+                        style: 'cancel',
+                    },
+                    {
+                        text: 'Continue Anyway',
+                        onPress: () => proceedWithEnRoute(appointment),
+                    },
+                ]
+            );
+            return;
+        }
+        
+        // On time - show normal confirmation
         Alert.alert(
             'Start En Route',
             'Change status to "On the Way" and navigate to route screen?',
@@ -206,53 +298,58 @@ export default function FixMoToday() {
                 },
                 {
                     text: 'Start',
-                    onPress: async () => {
-                        try {
-                            const token = await AsyncStorage.getItem('providerToken');
-                            if (!token) {
-                                Alert.alert('Error', 'Authentication required');
-                                return;
-                            }
-
-                            // Update status to ongoing
-                            await startEnRoute(appointment.appointment_id, token);
-
-                            // Get provider location from AsyncStorage
-                            const providerData = await AsyncStorage.getItem('providerProfile');
-                            let providerLocation = '';
-                            if (providerData) {
-                                try {
-                                    const profile = JSON.parse(providerData);
-                                    providerLocation = profile.provider_exact_location || profile.exact_location || '';
-                                } catch (e) {
-                                    console.error('Error parsing provider profile:', e);
-                                }
-                            }
-
-                            // Navigate to enroute screen with appointment data
-                            router.push({
-                                pathname: "/provider/integration/enroutescreen",
-                                params: {
-                                    appointmentId: appointment.appointment_id.toString(),
-                                    customerId: appointment.customer_id.toString(),
-                                    customerName: getClientName(appointment),
-                                    serviceTitle: getServiceName(appointment),
-                                    scheduledDate: appointment.scheduled_date,
-                                    // Pass exact_location as string in "lat,lng" format
-                                    customerLocation: appointment.customer?.exact_location || `${appointment.customer?.latitude || 14.5995},${appointment.customer?.longitude || 120.9842}`,
-                                    providerLocation: appointment.provider?.provider_exact_location || providerLocation || '',
-                                },
-                            });
-
-                            // Refresh appointments list
-                            fetchAppointments();
-                        } catch (error: any) {
-                            Alert.alert('Error', error.message || 'Failed to start en route');
-                        }
-                    },
+                    onPress: () => proceedWithEnRoute(appointment),
                 },
             ]
         );
+    };
+
+    const proceedWithEnRoute = async (appointment: Appointment) => {
+        try {
+            const token = await AsyncStorage.getItem('providerToken');
+            if (!token) {
+                Alert.alert('Error', 'Authentication required');
+                return;
+            }
+
+            // Update status to ongoing
+            await startEnRoute(appointment.appointment_id, token);
+
+            // Get provider location from AsyncStorage
+            const providerData = await AsyncStorage.getItem('providerProfile');
+            let providerLocation = '';
+            if (providerData) {
+                try {
+                    const profile = JSON.parse(providerData);
+                    providerLocation = profile.provider_exact_location || profile.exact_location || '';
+                } catch (e) {
+                    console.error('Error parsing provider profile:', e);
+                }
+            }
+
+            // Navigate to enroute screen with appointment data
+            router.push({
+                pathname: "/provider/integration/enroutescreen",
+                params: {
+                    appointmentId: appointment.appointment_id.toString(),
+                    customerId: appointment.customer_id.toString(),
+                    customerName: getClientName(appointment),
+                    serviceTitle: getServiceName(appointment),
+                    scheduledDate: appointment.scheduled_date,
+                    // Pass exact_location as string in "lat,lng" format
+                    customerLocation: appointment.customer?.exact_location || `${appointment.customer?.latitude || 14.5995},${appointment.customer?.longitude || 120.9842}`,
+                    providerLocation: appointment.provider?.provider_exact_location || providerLocation || '',
+                    // Pass time slot information
+                    startTime: appointment.availability?.startTime || '',
+                    endTime: appointment.availability?.endTime || '',
+                },
+            });
+
+            // Refresh appointments list
+            fetchAppointments();
+        } catch (error: any) {
+            Alert.alert('Error', error.message || 'Failed to start en route');
+        }
     };
 
     const handleChat = async (appointment: Appointment) => {
@@ -569,7 +666,7 @@ export default function FixMoToday() {
         }
         if (activeTab === "ongoing") {
             // Show confirmed (on the way), in-progress, and ongoing appointments
-            return apt.appointment_status === "confirmed" || apt.appointment_status === "in-progress" || apt.appointment_status === "ongoing";
+            return apt.appointment_status === "confirmed" || apt.appointment_status === "in-progress" || apt.appointment_status === "ongoing" || apt.appointment_status === "On the Way";
         }
         if (activeTab === "finished") {
             // Show in-warranty, finished, and backjob appointments
@@ -578,6 +675,10 @@ export default function FixMoToday() {
         if (activeTab === "completed") {
             // Show completed appointments (warranty expired)
             return apt.appointment_status === "completed";
+        }
+        if (activeTab === "cancelled") {
+            // Show cancelled and user_no_show appointments
+            return apt.appointment_status === "cancelled" || apt.appointment_status === "user_no_show";
         }
         return apt.appointment_status === activeTab;
     });
@@ -630,6 +731,11 @@ export default function FixMoToday() {
                             const location = getLocation(item);
                             const coords = getCoords(item);
                             
+                            // Check timing status for scheduled appointments
+                            const timingStatus = (item.appointment_status === "scheduled" || item.appointment_status === "approved") 
+                                ? checkAppointmentTiming(item) 
+                                : 'on-time';
+                            
                             return (
                                 <View style={styles.appointmentBox}>
                                     <View style={[styles.statusTag, {backgroundColor: statusColors[item.appointment_status]}]}>
@@ -649,6 +755,37 @@ export default function FixMoToday() {
                                                 : item.appointment_status.charAt(0).toUpperCase() + item.appointment_status.slice(1)}
                                         </Text>
                                     </View>
+
+                                    {/* Late/Overdue Badge for scheduled appointments */}
+                                    {(item.appointment_status === 'scheduled' || item.appointment_status === 'approved') && timingStatus === 'late' && (
+                                        <View style={styles.lateBadge}>
+                                            <Ionicons name="time" size={16} color="#FF9800" />
+                                            <Text style={styles.lateText}>LATE START</Text>
+                                        </View>
+                                    )}
+                                    
+                                    {(item.appointment_status === 'scheduled' || item.appointment_status === 'approved') && timingStatus === 'overdue' && (
+                                        <View style={styles.overdueBadge}>
+                                            <Ionicons name="alert-circle" size={16} color="#D32F2F" />
+                                            <Text style={styles.overdueText}>OVERDUE - Cannot Start</Text>
+                                        </View>
+                                    )}
+
+                                    {/* Provider No-Show Badge */}
+                                    {item.appointment_status === 'cancelled' && item.cancellation_reason === 'provider-no-show' && (
+                                        <View style={styles.noShowBadge}>
+                                            <Ionicons name="alert-circle" size={16} color="#D32F2F" />
+                                            <Text style={styles.noShowText}>Provider No-Show (Overdue)</Text>
+                                        </View>
+                                    )}
+
+                                    {/* Customer No-Show Badge */}
+                                    {item.appointment_status === 'user_no_show' && (
+                                        <View style={styles.customerNoShowBadge}>
+                                            <Ionicons name="person-remove" size={16} color="#FF6F00" />
+                                            <Text style={styles.customerNoShowText}>Customer No-Show</Text>
+                                        </View>
+                                    )}
 
                                     <Text style={styles.bookingId}>Booking ID# {item.appointment_id}</Text>
                                     
@@ -735,9 +872,22 @@ export default function FixMoToday() {
 
                                             {(item.appointment_status === "scheduled" || item.appointment_status === "approved") && isApproved && isAppointmentDateReached(item.scheduled_date) && (
                                                 <>
-                                                    <TouchableOpacity style={styles.actionButton} onPress={() => handleEnRoute(item)}>
-                                                        <Text style={styles.actionButtonText}>En Route to Fix</Text>
-                                                    </TouchableOpacity>
+                                                    {/* Only show En Route button if not overdue */}
+                                                    {timingStatus !== 'overdue' && (
+                                                        <TouchableOpacity style={styles.actionButton} onPress={() => handleEnRoute(item)}>
+                                                            <Text style={styles.actionButtonText}>En Route to Fix</Text>
+                                                        </TouchableOpacity>
+                                                    )}
+                                                    
+                                                    {/* Show overdue message if appointment is overdue */}
+                                                    {timingStatus === 'overdue' && (
+                                                        <View style={[styles.disabledButton, { borderColor: '#D32F2F', backgroundColor: '#FFEBEE' }]}>
+                                                            <Ionicons name="close-circle" size={16} color="#D32F2F" />
+                                                            <Text style={[styles.disabledButtonText, { color: '#D32F2F' }]}>
+                                                                Appointment Overdue - Cannot Start
+                                                            </Text>
+                                                        </View>
+                                                    )}
                                                     
                                                     <TouchableOpacity 
                                                         style={[styles.actionButton, styles.cancelButton]} 
@@ -795,6 +945,8 @@ export default function FixMoToday() {
                                                                     scheduledDate: item.scheduled_date,
                                                                     customerLocation: item.customer?.exact_location || `${item.customer?.latitude || 14.5995},${item.customer?.longitude || 120.9842}`,
                                                                     providerLocation: item.provider?.provider_exact_location || providerLocation || '',
+                                                                    startTime: item.availability?.startTime || '',
+                                                                    endTime: item.availability?.endTime || '',
                                                                 },
                                                             });
                                                         } catch (error) {
@@ -984,6 +1136,74 @@ const styles = StyleSheet.create({
     appointmentBox: {backgroundColor: "#f2f2f2", borderRadius: 20, padding: 15, marginBottom: 16},
     statusTag: {paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginBottom: 8, alignSelf: "flex-start"},
     statusText: {color: "#fff", fontFamily: "PoppinsBold", fontSize: 12},
+    lateBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#FFF3E0",
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: "#FF9800",
+    },
+    lateText: {
+        fontSize: 12,
+        fontFamily: "PoppinsSemiBold",
+        color: "#FF9800",
+        marginLeft: 6,
+    },
+    overdueBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#FFEBEE",
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: "#D32F2F",
+    },
+    overdueText: {
+        fontSize: 12,
+        fontFamily: "PoppinsSemiBold",
+        color: "#D32F2F",
+        marginLeft: 6,
+    },
+    noShowBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#FFEBEE",
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: "#D32F2F",
+    },
+    noShowText: {
+        fontSize: 12,
+        fontFamily: "PoppinsSemiBold",
+        color: "#D32F2F",
+        marginLeft: 6,
+    },
+    customerNoShowBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#FFF3E0",
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: "#FF6F00",
+    },
+    customerNoShowText: {
+        fontSize: 12,
+        fontFamily: "PoppinsSemiBold",
+        color: "#FF6F00",
+        marginLeft: 6,
+    },
     bookingId: {fontSize: 12, fontFamily: "PoppinsMedium", color: "#666", marginBottom: 4},
     clientName: {fontSize: 16, fontFamily: "PoppinsSemiBold", color: "#333"},
     serviceType: {fontSize: 14, fontFamily: "PoppinsRegular", color: "#555", marginTop: 4},

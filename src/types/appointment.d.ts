@@ -11,9 +11,11 @@ export type AppointmentStatus =
   | 'completed'
   | 'cancelled'
   | 'no-show'
+  | 'user_no_show'  // Customer no-show reported by provider
   // Legacy support
   | 'scheduled'  // Maps to approved
-  | 'ongoing';  // Maps to in-progress
+  | 'ongoing'  // Maps to in-progress
+  | 'On the Way';  // Alternative format for confirmed status
 
 export type BackjobStatus = 
   | 'pending'
@@ -108,6 +110,12 @@ export interface Appointment {
     service_title: string;
     service_description?: string;
     service_startingprice?: number;
+  };
+  availability?: {
+    availability_id: number;
+    startTime: string;  // Format: "HH:mm" (e.g., "08:00")
+    endTime: string;    // Format: "HH:mm" (e.g., "10:30")
+    dayOfWeek?: string;
   };
 }
 

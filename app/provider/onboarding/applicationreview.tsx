@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { verifyAndRegisterProvider } from '../../../src/api/auth.api';
 
 export default function ApplicationReview() {
@@ -11,11 +11,6 @@ export default function ApplicationReview() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        // Auto-submit when component mounts
-        handleSubmitRegistration();
-    }, []);
 
     const clearOnboardingData = async () => {
         try {
@@ -194,28 +189,121 @@ export default function ApplicationReview() {
         );
     }
 
+    // Show success screen after submission
+    if (isSubmitted) {
+        return (
+            <View style={styles.container}>
+                {/* Logo */}
+                <Image
+                    source={require('../../assets/images/fixmo-logo.png')}
+                    style={styles.logo}
+                    resizeMode="contain"
+                />
+
+                {/* Message */}
+                <Text style={styles.title}>Application Submitted!</Text>
+                <Text style={styles.message}>
+                    Thanks for applying to join FixMo. Our team is reviewing your details.
+                    You'll be notified once your application is approved.
+                </Text>
+
+                {/* Continue Button */}
+                <TouchableOpacity style={styles.button} onPress={handleContinue}>
+                    <Text style={styles.buttonText}>Continue</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    }
+
+    // Show review screen before submission
+    const professions = params.professions ? (params.professions as string).split(',') : [];
+    const experiences = params.experiences ? (params.experiences as string).split(',') : [];
+    const certificateNames = params.certificateNames ? (params.certificateNames as string).split(',') : [];
+
     return (
-        <View style={styles.container}>
+        <View style={{flex: 1, backgroundColor: '#fff'}}>
+            <ScrollView contentContainerStyle={styles.reviewContainer}>
+                <Text style={styles.reviewTitle}>Review Your Application</Text>
+                <Text style={styles.reviewSubtitle}>Please review your information before submitting</Text>
 
+                {/* Personal Information */}
+                <View style={styles.reviewSection}>
+                    <Text style={styles.sectionTitle}>Personal Information</Text>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Name:</Text>
+                        <Text style={styles.value}>{params.firstName} {params.lastName}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Email:</Text>
+                        <Text style={styles.value}>{params.email}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Phone:</Text>
+                        <Text style={styles.value}>{params.phone}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Birthday:</Text>
+                        <Text style={styles.value}>{params.dob}</Text>
+                    </View>
+                </View>
 
-            {/* Logo */}
-            <Image
-                source={require('../../assets/images/fixmo-logo.png')} // update path as needed
-                style={styles.logo}
-                resizeMode="contain"
-            />
+                {/* Location */}
+                <View style={styles.reviewSection}>
+                    <Text style={styles.sectionTitle}>Location</Text>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Address:</Text>
+                        <Text style={styles.value}>{params.provider_location}</Text>
+                    </View>
+                </View>
 
-            {/* Message */}
-            <Text style={styles.title}>Application Submitted!</Text>
-            <Text style={styles.message}>
-                Thanks for applying to join FixMo. Our team is reviewing your details.
-                You'll be notified once your application is approved.
-            </Text>
+                {/* Professional Information */}
+                <View style={styles.reviewSection}>
+                    <Text style={styles.sectionTitle}>Professional Information</Text>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>ULI:</Text>
+                        <Text style={styles.value}>{params.uliNumber}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Professions:</Text>
+                        <Text style={styles.value}>{professions.join(', ')}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Experience (years):</Text>
+                        <Text style={styles.value}>{experiences.join(', ')}</Text>
+                    </View>
+                </View>
 
-            {/* Continue Button */}
-            <TouchableOpacity style={styles.button} onPress={handleContinue}>
-                <Text style={styles.buttonText}>Continue</Text>
-            </TouchableOpacity>
+                {/* Certificates */}
+                <View style={styles.reviewSection}>
+                    <Text style={styles.sectionTitle}>TESDA Certificates</Text>
+                    {certificateNames.map((name, index) => (
+                        <View key={index} style={styles.certificateItem}>
+                            <Ionicons name="document-text" size={20} color="#008080" />
+                            <Text style={styles.certificateName}>{name}</Text>
+                        </View>
+                    ))}
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.buttonContainer}>
+                    <TouchableOpacity 
+                        style={styles.editButton} 
+                        onPress={() => router.back()}
+                    >
+                        <Ionicons name="arrow-back" size={20} color="#008080" />
+                        <Text style={styles.editButtonText}>Go Back to Edit</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                        style={styles.submitButton} 
+                        onPress={handleSubmitRegistration}
+                        disabled={isSubmitting}
+                    >
+                        <Text style={styles.submitButtonText}>Submit Application</Text>
+                        <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                    </TouchableOpacity>
+                </View>
+            </ScrollView>
         </View>
     );
 }
@@ -227,6 +315,99 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#fff',
+    },
+    reviewContainer: {
+        padding: 20,
+        paddingBottom: 40,
+    },
+    reviewTitle: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#008080',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    reviewSubtitle: {
+        fontSize: 14,
+        color: '#666',
+        marginBottom: 24,
+        textAlign: 'center',
+    },
+    reviewSection: {
+        backgroundColor: '#f9f9f9',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        borderLeftWidth: 4,
+        borderLeftColor: '#008080',
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#008080',
+        marginBottom: 12,
+    },
+    infoRow: {
+        flexDirection: 'row',
+        marginBottom: 8,
+        gap: 8,
+    },
+    label: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#666',
+        minWidth: 100,
+    },
+    value: {
+        fontSize: 14,
+        color: '#333',
+        flex: 1,
+    },
+    certificateItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 8,
+    },
+    certificateName: {
+        fontSize: 14,
+        color: '#333',
+    },
+    buttonContainer: {
+        marginTop: 24,
+        gap: 12,
+    },
+    editButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderColor: '#008080',
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 30,
+        gap: 8,
+    },
+    editButtonText: {
+        color: '#008080',
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    submitButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#008080',
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 30,
+        gap: 8,
+    },
+    submitButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: 'bold',
     },
     header: {
         color: '#888',

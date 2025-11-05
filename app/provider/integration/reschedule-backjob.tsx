@@ -108,10 +108,15 @@ export default function RescheduleBackjobScreen() {
             Saturday: 6,
         };
 
-        // Get active availability days
-        const activeDays = availData
-            .filter((av) => av.availability_isActive)
-            .map((av) => dayNameToNumber[av.dayOfWeek]);
+        // Get active availability days (only those with active slots)
+        const activeDaysMap = new Map<number, boolean>();
+        availData.forEach((av) => {
+            const dayNum = dayNameToNumber[av.dayOfWeek];
+            if (av.availability_isActive && av.slot_isActive !== false) {
+                activeDaysMap.set(dayNum, true);
+            }
+        });
+        const activeDays = Array.from(activeDaysMap.keys());
 
         // Get dates with existing appointments
         const bookedDates = new Set(
@@ -184,14 +189,23 @@ export default function RescheduleBackjobScreen() {
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const dayName = dayNames[selectedDay];
 
-        const availability = availabilities.find(
-            (av) => av.dayOfWeek === dayName && av.availability_isActive
+        // Filter availabilities for selected day that are both day-active and slot-active
+        const dayAvailabilities = availabilities.filter(
+            (av) => av.dayOfWeek === dayName && av.availability_isActive && av.slot_isActive !== false
         );
 
-        if (availability) {
-            const times = generateTimeSlots(availability.startTime, availability.endTime);
-            setAvailableTimes(times);
+        if (dayAvailabilities.length > 0) {
+            // Generate all available time slots from all active time ranges
+            const allTimes = dayAvailabilities.flatMap((av) => 
+                generateTimeSlots(av.startTime, av.endTime)
+            );
+            // Remove duplicates and sort
+            const uniqueTimes = Array.from(new Set(allTimes)).sort();
+            setAvailableTimes(uniqueTimes);
             setSelectedTime(""); // Reset selected time
+        } else {
+            setAvailableTimes([]);
+            setSelectedTime("");
         }
     };
 
@@ -252,15 +266,25 @@ export default function RescheduleBackjobScreen() {
                                 return;
                             }
 
-                            // Find the availability_id for the selected day
+                            // Find the availability_id for the selected day and time slot
                             const selectedDay = new Date(selectedDate).getDay();
                             const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                            const availability = availabilities.find(
-                                (av) => av.dayOfWeek === dayNames[selectedDay] && av.availability_isActive
-                            );
+                            
+                            // Find the availability that matches the selected time slot
+                            const [selectedHour] = selectedTime.split(':').map(Number);
+                            const availability = availabilities.find((av) => {
+                                if (av.dayOfWeek !== dayNames[selectedDay] || !av.availability_isActive || av.slot_isActive === false) {
+                                    return false;
+                                }
+                                
+                                // Check if selected time falls within this availability's time range
+                                const [startHour] = av.startTime.split(':').map(Number);
+                                const [endHour] = av.endTime.split(':').map(Number);
+                                return selectedHour >= startHour && selectedHour < endHour;
+                            });
 
                             if (!availability || !availability.availability_id) {
-                                Alert.alert('Error', 'Availability not found for selected date');
+                                Alert.alert('Error', 'Availability not found for selected time slot');
                                 return;
                             }
 
@@ -343,7 +367,7 @@ export default function RescheduleBackjobScreen() {
                 <View style={styles.instructionsCard}>
                     <Ionicons name="information-circle" size={20} color="#2196F3" />
                     <Text style={styles.instructionsText}>
-                        Select a new date when you are available and not booked. Only your free days are shown.
+                        Select a new date when you are available and not booked. Only your active time slots are shown.
                     </Text>
                 </View>
 
@@ -405,6 +429,16 @@ export default function RescheduleBackjobScreen() {
                                 </TouchableOpacity>
                             ))}
                         </View>
+                    </View>
+                )}
+
+                {/* No Time Slots Available Message */}
+                {selectedDate && availableTimes.length === 0 && (
+                    <View style={styles.noSlotsCard}>
+                        <Ionicons name="time-outline" size={24} color="#FF9800" />
+                        <Text style={styles.noSlotsText}>
+                            No time slots available for this date. Please check your availability settings or select another date.
+                        </Text>
                     </View>
                 )}
 
@@ -664,6 +698,24 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontFamily: 'Poppins-SemiBold',
         color: '#1B5E20',
+    },
+    noSlotsCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF3E0',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#FF9800',
+    },
+    noSlotsText: {
+        fontSize: 13,
+        fontFamily: 'Poppins-Regular',
+        color: '#E65100',
+        marginLeft: 12,
+        flex: 1,
+        lineHeight: 20,
     },
     rescheduleButton: {
         flexDirection: 'row',

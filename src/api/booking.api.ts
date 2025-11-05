@@ -56,7 +56,7 @@ export const getAppointmentsByProviderId = async (
 ): Promise<Appointment[]> => {
   try {
     const response = await fetch(
-      `${API_CONFIG.BASE_URL}/api/appointments/provider/${providerId}?include=appointment_id,customer,provider,service`,
+      `${API_CONFIG.BASE_URL}/api/appointments/provider/${providerId}?include=appointment_id,customer,provider,service,availability`,
       {
         method: 'GET',
         headers: {
@@ -121,7 +121,7 @@ export const updateAppointment = async (
 };
 
 /**
- * Start en route - change appointment status to 'on the way'
+ * Start en route - change appointment status to 'On the Way'
  * @param appointmentId - The ID of the appointment
  * @param token - JWT authentication token
  */
@@ -275,6 +275,133 @@ export const cancelAppointmentByProvider = async (
     };
   } catch (error: any) {
     console.error('💥 Error cancelling appointment:', error);
+    return {
+      success: false,
+      message: error.message || 'Network error. Please try again.',
+    };
+  }
+};
+
+/**
+ * Mark appointment as provider no-show (overdue appointment)
+ * @param appointmentId - The ID of the appointment
+ * @param token - Provider JWT authentication token
+ */
+export const markAsProviderNoShow = async (
+  appointmentId: number,
+  token: string
+): Promise<{ success: boolean; message: string; data?: any }> => {
+  try {
+    const url = `${API_CONFIG.BASE_URL}/api/appointments/${appointmentId}/provider-no-show`;
+    
+    console.log('⏰ Marking appointment as provider no-show:', appointmentId);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        cancellation_reason: 'provider-no-show',
+      }),
+    });
+
+    console.log('📡 Response status:', response.status, response.statusText);
+
+    const data = await response.json();
+    console.log('📡 Response data:', data);
+
+    if (!response.ok) {
+      console.error('❌ Failed to mark as no-show. Status:', response.status);
+      console.error('❌ Error data:', data);
+      return {
+        success: false,
+        message: data.message || 'Failed to mark as no-show',
+      };
+    }
+
+    console.log('✅ Appointment marked as provider no-show');
+
+    return {
+      success: true,
+      message: data.message || 'Appointment marked as provider no-show',
+      data: data.data,
+    };
+  } catch (error: any) {
+    console.error('💥 Error marking as no-show:', error);
+    return {
+      success: false,
+      message: error.message || 'Network error. Please try again.',
+    };
+  }
+};
+
+/**
+ * Report customer no-show with photo evidence
+ * @param appointmentId - The ID of the appointment
+ * @param token - JWT authentication token
+ * @param photoUri - Local URI of the evidence photo
+ * @param description - Description/explanation of the no-show situation
+ */
+export const reportCustomerNoShow = async (
+  appointmentId: number,
+  token: string,
+  photoUri: string,
+  description: string
+): Promise<{ success: boolean; message: string; data?: any }> => {
+  try {
+    console.log('🚫 Reporting customer no-show for appointment:', appointmentId);
+
+    // Create FormData for multipart/form-data upload
+    const formData = new FormData();
+    
+    // Add description
+    formData.append('description', description);
+    
+    // Add photo - React Native FormData format
+    const photoFile = {
+      uri: photoUri,
+      type: 'image/jpeg',
+      name: 'evidence.jpg',
+    } as any;
+    formData.append('evidence_photo', photoFile);
+
+    const response = await fetch(
+      `${API_CONFIG.BASE_URL}/api/serviceProvider/appointments/${appointmentId}/report-no-show`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          // Note: Don't set Content-Type for FormData, browser/RN will set it with boundary
+        },
+        body: formData,
+      }
+    );
+
+    console.log('📡 Response status:', response.status, response.statusText);
+
+    const data = await response.json();
+    console.log('📡 Response data:', data);
+
+    if (!response.ok) {
+      console.error('❌ Failed to report customer no-show. Status:', response.status);
+      console.error('❌ Error data:', data);
+      return {
+        success: false,
+        message: data.message || 'Failed to report customer no-show',
+      };
+    }
+
+    console.log('✅ Customer no-show reported successfully');
+
+    return {
+      success: true,
+      message: data.message || 'Customer no-show reported successfully',
+      data: data.data,
+    };
+  } catch (error: any) {
+    console.error('💥 Error reporting customer no-show:', error);
     return {
       success: false,
       message: error.message || 'Network error. Please try again.',

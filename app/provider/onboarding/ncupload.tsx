@@ -110,17 +110,35 @@ export default function RequirementsUpload() {
     };
 
     const isPasswordValid = (password: string) => {
-        const regex =
-            /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
-        return regex.test(password);
+        // Password must be 10-16 characters with uppercase, lowercase, number, and special character
+        if (password.length < 10 || password.length > 16) return false;
+        
+        const hasUpperCase = /[A-Z]/.test(password);
+        const hasLowerCase = /[a-z]/.test(password);
+        const hasNumber = /\d/.test(password);
+        const hasSpecialChar = /[\W_]/.test(password);
+        
+        return hasUpperCase && hasLowerCase && hasNumber && hasSpecialChar;
+    };
+
+    // Get password validation status for dynamic feedback
+    const getPasswordValidation = (password: string) => {
+        return {
+            length: password.length >= 10 && password.length <= 16,
+            hasUpperCase: /[A-Z]/.test(password),
+            hasLowerCase: /[a-z]/.test(password),
+            hasNumber: /\d/.test(password),
+            hasSpecialChar: /[\W_]/.test(password),
+        };
     };
 
     const handleNext = () => {
-        // Validate ULI is 12 digits
-        if (uliNumber.length !== 12) {
+        // Validate ULI format (19 characters without dashes)
+        const cleanUli = uliNumber.replace(/-/g, '');
+        if (cleanUli.length !== 19 || !cleanUli.startsWith('ULI')) {
             Alert.alert(
                 "Invalid ULI",
-                "ULI must be exactly 12 digits."
+                "ULI must be in format: ULI-MNG-03-062-03014-001"
             );
             return;
         }
@@ -161,7 +179,7 @@ export default function RequirementsUpload() {
         if (!isPasswordValid(password)) {
             Alert.alert(
                 "Invalid Password",
-                "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
+                "Password must be 10-16 characters and include uppercase, lowercase, number, and special character."
             );
             return;
         }
@@ -205,18 +223,74 @@ export default function RequirementsUpload() {
                     {/* Professional Info */}
                     <Text style={styles.sectionHeader}>Professional Information</Text>
                     <View style={styles.section}>
-                        <Text style={styles.title}>Unique Learner Identifier (12 digits)</Text>
+                        <Text style={styles.title}>Unique Learner Identifier (ULI Format)</Text>
                         <View style={styles.uliRow}>
                             <TextInput
                                 style={styles.input}
-                                placeholder="Enter your 12-digit ULI"
-                                keyboardType="numeric"
-                                maxLength={12}
+                                placeholder="ULI-XXX-XX-XXX-XXXXX-XXX"
+                                keyboardType="default"
+                                maxLength={29}
                                 value={uliNumber}
                                 onChangeText={(val) => {
-                                    // Only allow numbers
-                                    const numericText = val.replace(/[^0-9]/g, '');
-                                    setUliNumber(numericText);
+                                    // Remove all non-alphanumeric characters except dashes
+                                    let cleanText = val.replace(/[^A-Z0-9-]/gi, '').toUpperCase();
+                                    
+                                    // If user is deleting, just update with cleaned text
+                                    if (cleanText.length < uliNumber.length) {
+                                        setUliNumber(cleanText);
+                                        return;
+                                    }
+                                    
+                                    // Remove dashes to work with raw characters
+                                    const rawText = cleanText.replace(/-/g, '');
+                                    
+                                    // Auto-add "ULI" prefix if not present
+                                    let formatted = '';
+                                    if (!rawText.startsWith('ULI')) {
+                                        formatted = 'ULI';
+                                        // Add the characters after ULI
+                                        const remaining = rawText;
+                                        
+                                        // Format: ULI-MNG-03-062-03014-001
+                                        // Positions: ULI(3)-MNG(3)-03(2)-062(3)-03014(5)-001(3) = 19 chars total
+                                        if (remaining.length > 0) {
+                                            formatted += '-' + remaining.substring(0, 3); // MNG
+                                        }
+                                        if (remaining.length > 3) {
+                                            formatted += '-' + remaining.substring(3, 5); // 03
+                                        }
+                                        if (remaining.length > 5) {
+                                            formatted += '-' + remaining.substring(5, 8); // 062
+                                        }
+                                        if (remaining.length > 8) {
+                                            formatted += '-' + remaining.substring(8, 13); // 03014
+                                        }
+                                        if (remaining.length > 13) {
+                                            formatted += '-' + remaining.substring(13, 16); // 001
+                                        }
+                                    } else {
+                                        // If it already has ULI, format the entire string
+                                        formatted = 'ULI';
+                                        const remaining = rawText.substring(3);
+                                        
+                                        if (remaining.length > 0) {
+                                            formatted += '-' + remaining.substring(0, 3);
+                                        }
+                                        if (remaining.length > 3) {
+                                            formatted += '-' + remaining.substring(3, 5);
+                                        }
+                                        if (remaining.length > 5) {
+                                            formatted += '-' + remaining.substring(5, 8);
+                                        }
+                                        if (remaining.length > 8) {
+                                            formatted += '-' + remaining.substring(8, 13);
+                                        }
+                                        if (remaining.length > 13) {
+                                            formatted += '-' + remaining.substring(13, 16);
+                                        }
+                                    }
+                                    
+                                    setUliNumber(formatted);
                                 }}
                             />
                             <TouchableOpacity onPress={() => setShowTooltip(true)}>
@@ -227,6 +301,11 @@ export default function RequirementsUpload() {
                                 />
                             </TouchableOpacity>
                         </View>
+                        {uliNumber && uliNumber.replace(/-/g, '').length < 19 && (
+                            <Text style={{color: '#F44336', fontSize: 12, marginTop: 4}}>
+                                Complete format: ULI-XXX-XX-XXX-XXXXX-XXX ({uliNumber.replace(/-/g, '').length}/19 characters)
+                            </Text>
+                        )}
                     </View>
 
                     {/* Professions */}
@@ -282,11 +361,14 @@ export default function RequirementsUpload() {
                                 <View style={styles.fieldRow}>
                                     <TextInput
                                         style={[styles.input, {flex: 1}]}
-                                        placeholder="e.g. 5 years in electrical work"
+                                        placeholder="e.g. 5"
+                                        keyboardType="numeric"
                                         value={experience}
                                         onChangeText={(val) => {
+                                            // Only allow numbers
+                                            const numericText = val.replace(/[^0-9]/g, '');
                                             const updated = [...experiences];
-                                            updated[index] = val;
+                                            updated[index] = numericText;
                                             setExperiences(updated);
                                         }}
                                     />
@@ -330,19 +412,91 @@ export default function RequirementsUpload() {
                             value={password}
                             onChangeText={setPassword}
                         />
-                        <Text style={styles.passwordNote}>
-                            Must be at least 8 characters and include uppercase,
-                            lowercase, number, and special character.
-                        </Text>
+                        
+                        {/* Dynamic Password Validation */}
+                        {password.length > 0 && (
+                            <View style={{marginTop: 8, marginBottom: 12}}>
+                                <View style={styles.validationRow}>
+                                    <Ionicons 
+                                        name={getPasswordValidation(password).length ? "checkmark-circle" : "close-circle"} 
+                                        size={16} 
+                                        color={getPasswordValidation(password).length ? "#4CAF50" : "#F44336"} 
+                                    />
+                                    <Text style={[styles.validationText, {color: getPasswordValidation(password).length ? "#4CAF50" : "#F44336"}]}>
+                                        10-16 characters
+                                    </Text>
+                                </View>
+                                <View style={styles.validationRow}>
+                                    <Ionicons 
+                                        name={getPasswordValidation(password).hasUpperCase ? "checkmark-circle" : "close-circle"} 
+                                        size={16} 
+                                        color={getPasswordValidation(password).hasUpperCase ? "#4CAF50" : "#F44336"} 
+                                    />
+                                    <Text style={[styles.validationText, {color: getPasswordValidation(password).hasUpperCase ? "#4CAF50" : "#F44336"}]}>
+                                        Uppercase letter (A-Z)
+                                    </Text>
+                                </View>
+                                <View style={styles.validationRow}>
+                                    <Ionicons 
+                                        name={getPasswordValidation(password).hasLowerCase ? "checkmark-circle" : "close-circle"} 
+                                        size={16} 
+                                        color={getPasswordValidation(password).hasLowerCase ? "#4CAF50" : "#F44336"} 
+                                    />
+                                    <Text style={[styles.validationText, {color: getPasswordValidation(password).hasLowerCase ? "#4CAF50" : "#F44336"}]}>
+                                        Lowercase letter (a-z)
+                                    </Text>
+                                </View>
+                                <View style={styles.validationRow}>
+                                    <Ionicons 
+                                        name={getPasswordValidation(password).hasNumber ? "checkmark-circle" : "close-circle"} 
+                                        size={16} 
+                                        color={getPasswordValidation(password).hasNumber ? "#4CAF50" : "#F44336"} 
+                                    />
+                                    <Text style={[styles.validationText, {color: getPasswordValidation(password).hasNumber ? "#4CAF50" : "#F44336"}]}>
+                                        Number (0-9)
+                                    </Text>
+                                </View>
+                                <View style={styles.validationRow}>
+                                    <Ionicons 
+                                        name={getPasswordValidation(password).hasSpecialChar ? "checkmark-circle" : "close-circle"} 
+                                        size={16} 
+                                        color={getPasswordValidation(password).hasSpecialChar ? "#4CAF50" : "#F44336"} 
+                                    />
+                                    <Text style={[styles.validationText, {color: getPasswordValidation(password).hasSpecialChar ? "#4CAF50" : "#F44336"}]}>
+                                        Special character (!@#$%^&*)
+                                    </Text>
+                                </View>
+                            </View>
+                        )}
 
                         <Text style={styles.title}>Confirm Password</Text>
                         <TextInput
-                            style={styles.input}
+                            style={[
+                                styles.input,
+                                confirmPassword.length > 0 && {
+                                    borderColor: password === confirmPassword ? "#4CAF50" : "#F44336",
+                                    borderWidth: 2,
+                                }
+                            ]}
                             placeholder="Confirm password"
                             secureTextEntry
                             value={confirmPassword}
                             onChangeText={setConfirmPassword}
                         />
+                        
+                        {/* Password Match Indicator */}
+                        {confirmPassword.length > 0 && (
+                            <View style={styles.validationRow}>
+                                <Ionicons 
+                                    name={password === confirmPassword ? "checkmark-circle" : "close-circle"} 
+                                    size={16} 
+                                    color={password === confirmPassword ? "#4CAF50" : "#F44336"} 
+                                />
+                                <Text style={[styles.validationText, {color: password === confirmPassword ? "#4CAF50" : "#F44336"}]}>
+                                    {password === confirmPassword ? "Passwords match" : "Passwords do not match"}
+                                </Text>
+                            </View>
+                        )}
                     </View>
 
                     {/* TESDA Certificates */}
@@ -500,9 +654,7 @@ export default function RequirementsUpload() {
                 >
                     <View style={styles.tooltipBox}>
                         <Text style={styles.tooltipText}>
-                            The Unique Learner Identifier (ULI) is a 12-digit number
-                            assigned to every student or trainee enrolled in TESDA
-                            programs.
+                            The Unique Learner Identifier (ULI) is assigned to every student or trainee enrolled in TESDA programs. Format: ULI-MNG-03-062-03014-001
                         </Text>
                     </View>
                 </TouchableOpacity>
@@ -548,6 +700,16 @@ const styles = StyleSheet.create({
         overflow: "hidden",
     },
     passwordNote: {fontSize: 12, color: "#888", marginTop: 4, marginBottom: 12},
+    validationRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 6,
+        gap: 6,
+    },
+    validationText: {
+        fontSize: 12,
+        fontWeight: "500",
+    },
     circleButton: {
         width: 100,
         height: 100,

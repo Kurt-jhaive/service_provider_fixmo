@@ -2,21 +2,27 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { format, parseISO } from "date-fns";
+import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Image,
     Linking,
+    Modal,
     Platform,
+    ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
 import { WebView } from "react-native-webview";
-import { markAsArrived } from "../../../src/api/booking.api";
+import { markAsArrived, markAsProviderNoShow, reportCustomerNoShow } from "../../../src/api/booking.api";
+import type { Appointment } from "../../../src/types/appointment";
 
 export default function EnRouteScreen() {
     const params = useLocalSearchParams();
@@ -28,6 +34,16 @@ export default function EnRouteScreen() {
     const [distance, setDistance] = useState<string>("Calculating...");
     const [loading, setLoading] = useState(true);
     const [mapHtml, setMapHtml] = useState<string>("");
+    const [appointmentData, setAppointmentData] = useState<Appointment | null>(null);
+
+    // Timer states for customer no-show feature
+    const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
+    const [enRouteStartTime, setEnRouteStartTime] = useState<Date>(new Date());
+    const [showNoShowModal, setShowNoShowModal] = useState<boolean>(false);
+    const [noShowDescription, setNoShowDescription] = useState<string>("");
+    const [evidencePhoto, setEvidencePhoto] = useState<string | null>(null);
+    const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+    const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
 
     // Parse appointment data from params
     const appointmentId = params.appointmentId as string;
@@ -36,6 +52,8 @@ export default function EnRouteScreen() {
     const scheduledDate = params.scheduledDate as string;
     const customerLocationStr = params.customerLocation as string;
     const providerLocationStr = params.providerLocation as string;
+    const startTime = params.startTime as string; // e.g., "08:00"
+    const endTime = params.endTime as string; // e.g., "10:30"
 
     // Parse exact_location if it's in "lat,lng" format
     const parseExactLocation = (locationStr: string): { latitude: number; longitude: number } | null => {
@@ -251,6 +269,141 @@ export default function EnRouteScreen() {
         };
     }, []);
 
+    // Timer to track elapsed time since en route started (for 1-hour customer no-show feature)
+    useEffect(() => {
+        // Calculate immediately on mount
+        const calculateElapsed = () => {
+            const now = new Date();
+            const elapsed = Math.floor((now.getTime() - enRouteStartTime.getTime()) / 1000 / 60); // minutes
+            setElapsedMinutes(elapsed);
+            console.log('⏱️ Timer Update - Elapsed minutes:', elapsed);
+        };
+
+        // Run immediately
+        calculateElapsed();
+
+        // Then run every minute
+        const timerInterval = setInterval(calculateElapsed, 60000); // Update every minute
+
+        return () => clearInterval(timerInterval);
+    }, [enRouteStartTime]);
+
+    // Handle photo selection for customer no-show evidence
+    const handleSelectPhoto = async () => {
+        try {
+            // Request camera permissions
+            const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+            const mediaPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+            if (!cameraPermission.granted || !mediaPermission.granted) {
+                Alert.alert('Permission Required', 'Camera and media library access is required to upload evidence.');
+                return;
+            }
+
+            // Show options: Camera or Gallery
+            Alert.alert(
+                'Select Photo Source',
+                'Choose where to get the evidence photo',
+                [
+                    {
+                        text: 'Take Photo',
+                        onPress: async () => {
+                            const result = await ImagePicker.launchCameraAsync({
+                                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                quality: 0.8,
+                                allowsEditing: true,
+                                aspect: [4, 3],
+                            });
+
+                            if (!result.canceled && result.assets && result.assets.length > 0) {
+                                setEvidencePhoto(result.assets[0].uri);
+                            }
+                        },
+                    },
+                    {
+                        text: 'Choose from Gallery',
+                        onPress: async () => {
+                            const result = await ImagePicker.launchImageLibraryAsync({
+                                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                quality: 0.8,
+                                allowsEditing: true,
+                                aspect: [4, 3],
+                            });
+
+                            if (!result.canceled && result.assets && result.assets.length > 0) {
+                                setEvidencePhoto(result.assets[0].uri);
+                            }
+                        },
+                    },
+                    {
+                        text: 'Cancel',
+                        style: 'cancel',
+                    },
+                ]
+            );
+        } catch (error) {
+            console.error('Error selecting photo:', error);
+            Alert.alert('Error', 'Failed to select photo. Please try again.');
+        }
+    };
+
+    // Handle customer no-show report submission
+    const handleSubmitNoShowReport = async () => {
+        // Validate inputs
+        if (!evidencePhoto) {
+            Alert.alert('Photo Required', 'Please upload a photo as evidence before submitting.');
+            return;
+        }
+
+        if (!noShowDescription.trim()) {
+            Alert.alert('Description Required', 'Please provide a description of the situation.');
+            return;
+        }
+
+        if (noShowDescription.trim().length < 10) {
+            Alert.alert('Description Too Short', 'Please provide a more detailed description (at least 10 characters).');
+            return;
+        }
+
+        try {
+            setIsSubmitting(true);
+
+            const token = await AsyncStorage.getItem('providerToken');
+            if (!token) {
+                Alert.alert('Error', 'Authentication required');
+                return;
+            }
+
+            // Call API to report customer no-show
+            const result = await reportCustomerNoShow(
+                parseInt(appointmentId),
+                token,
+                evidencePhoto,
+                noShowDescription.trim()
+            );
+
+            if (result.success) {
+                // Close report modal and show success modal
+                setShowNoShowModal(false);
+                setShowSuccessModal(true);
+            } else {
+                Alert.alert('Error', result.message || 'Failed to submit no-show report. Please try again.');
+            }
+        } catch (error: any) {
+            Alert.alert('Error', error.message || 'Network error. Please try again.');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // Handle opening customer no-show modal
+    const handleOpenNoShowModal = () => {
+        console.log('🚫 Opening customer no-show modal. Elapsed minutes:', elapsedMinutes);
+        setShowNoShowModal(true);
+        setNoShowDescription('');
+        setEvidencePhoto(null);
+    };
+
     // Open Google Maps for navigation
     const openGoogleMaps = () => {
         const url = Platform.select({
@@ -270,8 +423,115 @@ export default function EnRouteScreen() {
         }
     };
 
+    /**
+     * Check if provider is late or overdue for the appointment
+     * @returns 'on-time' | 'late' | 'overdue'
+     */
+    const checkAppointmentTimingStatus = (): 'on-time' | 'late' | 'overdue' => {
+        if (!scheduledDate || !startTime || !endTime) {
+            return 'on-time'; // Default if no time data
+        }
+
+        try {
+            const now = new Date();
+            const appointmentDate = parseISO(scheduledDate);
+            
+            // Parse start and end times (format: "HH:mm")
+            const [startHour, startMinute] = startTime.split(':').map(Number);
+            const [endHour, endMinute] = endTime.split(':').map(Number);
+            
+            // Create datetime objects for start and end
+            const startDateTime = new Date(appointmentDate);
+            startDateTime.setHours(startHour, startMinute, 0, 0);
+            
+            const endDateTime = new Date(appointmentDate);
+            endDateTime.setHours(endHour, endMinute, 0, 0);
+            
+            // Check timing status
+            if (now < startDateTime) {
+                return 'on-time'; // Before scheduled start time
+            } else if (now >= startDateTime && now <= endDateTime) {
+                return 'late'; // After start but before end - can still start with warning
+            } else {
+                return 'overdue'; // Past end time - cannot start
+            }
+        } catch (error) {
+            console.error('Error checking appointment timing:', error);
+            return 'on-time'; // Default to on-time if error
+        }
+    };
+
     // Handle arrived button - mark appointment as in-progress
     const handleArrived = async () => {
+        const timingStatus = checkAppointmentTimingStatus();
+        
+        // Check if appointment is overdue
+        if (timingStatus === 'overdue') {
+            Alert.alert(
+                'Appointment Overdue',
+                `This appointment was scheduled for ${startTime} - ${endTime}. The appointment is now overdue and cannot be started. It will be marked as a no-show.`,
+                [
+                    {
+                        text: 'OK',
+                        onPress: async () => {
+                            try {
+                                const token = await AsyncStorage.getItem('providerToken');
+                                if (!token) {
+                                    Alert.alert('Error', 'Authentication required');
+                                    return;
+                                }
+
+                                // Mark appointment as provider no-show
+                                const result = await markAsProviderNoShow(parseInt(appointmentId), token);
+                                
+                                if (result.success) {
+                                    Alert.alert(
+                                        'Appointment Cancelled',
+                                        'The appointment has been marked as a no-show and cancelled. This may affect your Fix-Score.',
+                                        [
+                                            {
+                                                text: 'OK',
+                                                onPress: () => router.replace('/provider/integration/fixmoto'),
+                                            },
+                                        ]
+                                    );
+                                } else {
+                                    Alert.alert('Error', result.message || 'Failed to mark as no-show');
+                                }
+                            } catch (error: any) {
+                                Alert.alert('Error', error.message || 'Failed to process no-show');
+                            }
+                        },
+                    },
+                ]
+            );
+            return;
+        }
+        
+        // Check if appointment is late (but not overdue)
+        if (timingStatus === 'late') {
+            Alert.alert(
+                'Late Start Warning',
+                `This appointment was scheduled to start at ${startTime}. Starting late may affect your Fix-Score. Do you want to continue?`,
+                [
+                    {
+                        text: 'Cancel',
+                        style: 'cancel',
+                    },
+                    {
+                        text: 'Continue Anyway',
+                        onPress: () => proceedWithArrival(),
+                    },
+                ]
+            );
+            return;
+        }
+        
+        // On time - proceed normally
+        proceedWithArrival();
+    };
+
+    const proceedWithArrival = async () => {
         Alert.alert(
             'Mark as Arrived',
             'Have you arrived at the customer location? This will change the status to "In Progress".',
@@ -381,8 +641,167 @@ export default function EnRouteScreen() {
                         <Ionicons name="checkmark-circle" size={20} color="#fff" />
                         <Text style={styles.arrivedButtonText}>I've Arrived</Text>
                     </TouchableOpacity>
+
+                    {/* Customer No Show Button - Shows after 1 hour (60 minutes) */}
+                    {(() => {
+                        const shouldShow = elapsedMinutes >= 1;
+                        console.log('🔍 No-Show Button Check - elapsedMinutes:', elapsedMinutes, 'shouldShow:', shouldShow);
+                        return shouldShow ? (
+                            <TouchableOpacity
+                                style={styles.noShowButton}
+                                onPress={handleOpenNoShowModal}
+                            >
+                                <Ionicons name="alert-circle-outline" size={20} color="#fff" />
+                                <Text style={styles.noShowButtonText}>Customer No Show</Text>
+                            </TouchableOpacity>
+                        ) : null;
+                    })()}
+
+                    {/* Timer display (for testing - shows minutes elapsed) */}
+                    {elapsedMinutes > 0 && (
+                        <Text style={styles.timerText}>
+                            Time elapsed: {elapsedMinutes} min{elapsedMinutes !== 1 ? 's' : ''}
+                            {elapsedMinutes < 60 && ` (No-show available in ${60 - elapsedMinutes} min${60 - elapsedMinutes !== 1 ? 's' : ''})`}
+                        </Text>
+                    )}
                 </View>
             </View>
+
+            {/* Customer No Show Report Modal */}
+            <Modal
+                visible={showNoShowModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setShowNoShowModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContainer}>
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            {/* Modal Header */}
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Report Customer No Show</Text>
+                                <TouchableOpacity
+                                    onPress={() => setShowNoShowModal(false)}
+                                    style={styles.closeButton}
+                                >
+                                    <Ionicons name="close" size={24} color="#666" />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Modal Message */}
+                            <Text style={styles.modalMessage}>
+                                It appears the customer is not available at the service location. 
+                                Please submit supporting evidence so we can review the situation and 
+                                update the appointment status.
+                            </Text>
+
+                            {/* Photo Upload Section */}
+                            <View style={styles.uploadSection}>
+                                <Text style={styles.sectionLabel}>Upload Photo Evidence *</Text>
+                                <Text style={styles.sectionHint}>
+                                    (Front door / gate / environment / timestamp proof)
+                                </Text>
+                                
+                                {evidencePhoto ? (
+                                    <View style={styles.photoPreviewContainer}>
+                                        <Image
+                                            source={{ uri: evidencePhoto }}
+                                            style={styles.photoPreview}
+                                            resizeMode="cover"
+                                        />
+                                        <TouchableOpacity
+                                            style={styles.changePhotoButton}
+                                            onPress={handleSelectPhoto}
+                                        >
+                                            <Text style={styles.changePhotoText}>Change Photo</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={styles.uploadButton}
+                                        onPress={handleSelectPhoto}
+                                    >
+                                        <Ionicons name="camera-outline" size={32} color="#00796B" />
+                                        <Text style={styles.uploadButtonText}>Take or Select Photo</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+
+                            {/* Description Input Section */}
+                            <View style={styles.descriptionSection}>
+                                <Text style={styles.sectionLabel}>Add Note / Explanation *</Text>
+                                <TextInput
+                                    style={styles.descriptionInput}
+                                    placeholder="Describe the situation (e.g., customer not answering door, phone calls not answered, etc.)"
+                                    placeholderTextColor="#999"
+                                    multiline
+                                    numberOfLines={4}
+                                    value={noShowDescription}
+                                    onChangeText={setNoShowDescription}
+                                    textAlignVertical="top"
+                                />
+                                <Text style={styles.characterCount}>
+                                    {noShowDescription.length} characters (minimum 10)
+                                </Text>
+                            </View>
+
+                            {/* Action Buttons */}
+                            <View style={styles.modalActions}>
+                                <TouchableOpacity
+                                    style={styles.cancelButton}
+                                    onPress={() => setShowNoShowModal(false)}
+                                    disabled={isSubmitting}
+                                >
+                                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.submitButton,
+                                        (isSubmitting || !evidencePhoto || noShowDescription.trim().length < 10) && styles.submitButtonDisabled
+                                    ]}
+                                    onPress={handleSubmitNoShowReport}
+                                    disabled={isSubmitting || !evidencePhoto || noShowDescription.trim().length < 10}
+                                >
+                                    {isSubmitting ? (
+                                        <ActivityIndicator color="#fff" size="small" />
+                                    ) : (
+                                        <Text style={styles.submitButtonText}>Submit Report</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Success Confirmation Modal */}
+            <Modal
+                visible={showSuccessModal}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => setShowSuccessModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.successModalContainer}>
+                        <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
+                        <Text style={styles.successTitle}>Report Submitted</Text>
+                        <Text style={styles.successMessage}>
+                            Your report has been submitted for review. The customer will be notified 
+                            and FixScore will not be affected while the case is being reviewed.
+                        </Text>
+                        <TouchableOpacity
+                            style={styles.successButton}
+                            onPress={() => {
+                                setShowSuccessModal(false);
+                                router.replace('/provider/integration/fixmoto');
+                            }}
+                        >
+                            <Text style={styles.successButtonText}>OK</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -536,5 +955,203 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontFamily: "PoppinsSemiBold",
         marginLeft: 8,
+    },
+    noShowButton: {
+        flexDirection: "row",
+        backgroundColor: "#D32F2F",
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 10,
+    },
+    noShowButtonText: {
+        color: "#fff",
+        fontSize: 15,
+        fontFamily: "PoppinsSemiBold",
+        marginLeft: 8,
+    },
+    timerText: {
+        fontSize: 12,
+        fontFamily: "PoppinsRegular",
+        color: "#999",
+        textAlign: "center",
+        marginTop: 8,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 20,
+    },
+    modalContainer: {
+        backgroundColor: "#fff",
+        borderRadius: 16,
+        width: "100%",
+        maxHeight: "90%",
+        padding: 20,
+    },
+    modalHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 16,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontFamily: "PoppinsSemiBold",
+        color: "#333",
+        flex: 1,
+    },
+    closeButton: {
+        padding: 4,
+    },
+    modalMessage: {
+        fontSize: 14,
+        fontFamily: "PoppinsRegular",
+        color: "#666",
+        lineHeight: 22,
+        marginBottom: 20,
+    },
+    uploadSection: {
+        marginBottom: 20,
+    },
+    sectionLabel: {
+        fontSize: 15,
+        fontFamily: "PoppinsSemiBold",
+        color: "#333",
+        marginBottom: 4,
+    },
+    sectionHint: {
+        fontSize: 12,
+        fontFamily: "PoppinsRegular",
+        color: "#999",
+        marginBottom: 12,
+    },
+    uploadButton: {
+        backgroundColor: "#E0F2F1",
+        borderWidth: 2,
+        borderColor: "#00796B",
+        borderStyle: "dashed",
+        borderRadius: 12,
+        padding: 30,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    uploadButtonText: {
+        fontSize: 14,
+        fontFamily: "PoppinsMedium",
+        color: "#00796B",
+        marginTop: 8,
+    },
+    photoPreviewContainer: {
+        alignItems: "center",
+    },
+    photoPreview: {
+        width: "100%",
+        height: 200,
+        borderRadius: 12,
+        marginBottom: 12,
+    },
+    changePhotoButton: {
+        backgroundColor: "#E0F2F1",
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+    },
+    changePhotoText: {
+        fontSize: 13,
+        fontFamily: "PoppinsMedium",
+        color: "#00796B",
+    },
+    descriptionSection: {
+        marginBottom: 20,
+    },
+    descriptionInput: {
+        borderWidth: 1,
+        borderColor: "#ddd",
+        borderRadius: 12,
+        padding: 12,
+        fontSize: 14,
+        fontFamily: "PoppinsRegular",
+        color: "#333",
+        minHeight: 100,
+        backgroundColor: "#f9f9f9",
+    },
+    characterCount: {
+        fontSize: 11,
+        fontFamily: "PoppinsRegular",
+        color: "#999",
+        marginTop: 4,
+        textAlign: "right",
+    },
+    modalActions: {
+        flexDirection: "row",
+        gap: 12,
+        marginTop: 10,
+    },
+    cancelButton: {
+        flex: 1,
+        backgroundColor: "#f5f5f5",
+        paddingVertical: 14,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    cancelButtonText: {
+        fontSize: 15,
+        fontFamily: "PoppinsSemiBold",
+        color: "#666",
+    },
+    submitButton: {
+        flex: 1,
+        backgroundColor: "#D32F2F",
+        paddingVertical: 14,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    submitButtonDisabled: {
+        backgroundColor: "#ccc",
+    },
+    submitButtonText: {
+        fontSize: 15,
+        fontFamily: "PoppinsSemiBold",
+        color: "#fff",
+    },
+    successModalContainer: {
+        backgroundColor: "#fff",
+        borderRadius: 16,
+        padding: 30,
+        alignItems: "center",
+        width: "90%",
+    },
+    successTitle: {
+        fontSize: 22,
+        fontFamily: "PoppinsSemiBold",
+        color: "#333",
+        marginTop: 16,
+        marginBottom: 12,
+    },
+    successMessage: {
+        fontSize: 14,
+        fontFamily: "PoppinsRegular",
+        color: "#666",
+        textAlign: "center",
+        lineHeight: 22,
+        marginBottom: 24,
+    },
+    successButton: {
+        backgroundColor: "#4CAF50",
+        paddingVertical: 12,
+        paddingHorizontal: 40,
+        borderRadius: 12,
+    },
+    successButtonText: {
+        fontSize: 15,
+        fontFamily: "PoppinsSemiBold",
+        color: "#fff",
     },
 });

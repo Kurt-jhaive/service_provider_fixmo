@@ -22,6 +22,29 @@ export default function CreateNewPassword() {
     const [showConfirm, setShowConfirm] = useState(false);
     const [loading, setLoading] = useState(false);
 
+    // Password validation function
+    const isPasswordValid = (password: string) => {
+        if (password.length < 10 || password.length > 16) return false;
+        
+        const hasUpperCase = /[A-Z]/.test(password);
+        const hasLowerCase = /[a-z]/.test(password);
+        const hasNumber = /\d/.test(password);
+        const hasSpecialChar = /[\W_]/.test(password);
+        
+        return hasUpperCase && hasLowerCase && hasNumber && hasSpecialChar;
+    };
+
+    // Get password validation status for dynamic feedback
+    const getPasswordValidation = (password: string) => {
+        return {
+            length: password.length >= 10 && password.length <= 16,
+            hasUpperCase: /[A-Z]/.test(password),
+            hasLowerCase: /[a-z]/.test(password),
+            hasNumber: /\d/.test(password),
+            hasSpecialChar: /[\W_]/.test(password),
+        };
+    };
+
     // Prevent back navigation
     useFocusEffect(
         React.useCallback(() => {
@@ -53,8 +76,11 @@ export default function CreateNewPassword() {
             return;
         }
 
-        if (password.length < 8) {
-            Alert.alert("Weak Password", "Password must be at least 8 characters.");
+        if (!isPasswordValid(password)) {
+            Alert.alert(
+                "Invalid Password", 
+                "Password must be 10-16 characters and include uppercase, lowercase, number, and special character."
+            );
             return;
         }
 
@@ -125,6 +151,62 @@ export default function CreateNewPassword() {
                 </TouchableOpacity>
             </View>
 
+            {/* Dynamic Password Validation */}
+            {password.length > 0 && (
+                <View style={styles.validationContainer}>
+                    <View style={styles.validationRow}>
+                        <Ionicons 
+                            name={getPasswordValidation(password).length ? "checkmark-circle" : "close-circle"} 
+                            size={16} 
+                            color={getPasswordValidation(password).length ? "#4CAF50" : "#F44336"} 
+                        />
+                        <Text style={[styles.validationText, {color: getPasswordValidation(password).length ? "#4CAF50" : "#F44336"}]}>
+                            10-16 characters
+                        </Text>
+                    </View>
+                    <View style={styles.validationRow}>
+                        <Ionicons 
+                            name={getPasswordValidation(password).hasUpperCase ? "checkmark-circle" : "close-circle"} 
+                            size={16} 
+                            color={getPasswordValidation(password).hasUpperCase ? "#4CAF50" : "#F44336"} 
+                        />
+                        <Text style={[styles.validationText, {color: getPasswordValidation(password).hasUpperCase ? "#4CAF50" : "#F44336"}]}>
+                            Uppercase letter (A-Z)
+                        </Text>
+                    </View>
+                    <View style={styles.validationRow}>
+                        <Ionicons 
+                            name={getPasswordValidation(password).hasLowerCase ? "checkmark-circle" : "close-circle"} 
+                            size={16} 
+                            color={getPasswordValidation(password).hasLowerCase ? "#4CAF50" : "#F44336"} 
+                        />
+                        <Text style={[styles.validationText, {color: getPasswordValidation(password).hasLowerCase ? "#4CAF50" : "#F44336"}]}>
+                            Lowercase letter (a-z)
+                        </Text>
+                    </View>
+                    <View style={styles.validationRow}>
+                        <Ionicons 
+                            name={getPasswordValidation(password).hasNumber ? "checkmark-circle" : "close-circle"} 
+                            size={16} 
+                            color={getPasswordValidation(password).hasNumber ? "#4CAF50" : "#F44336"} 
+                        />
+                        <Text style={[styles.validationText, {color: getPasswordValidation(password).hasNumber ? "#4CAF50" : "#F44336"}]}>
+                            Number (0-9)
+                        </Text>
+                    </View>
+                    <View style={styles.validationRow}>
+                        <Ionicons 
+                            name={getPasswordValidation(password).hasSpecialChar ? "checkmark-circle" : "close-circle"} 
+                            size={16} 
+                            color={getPasswordValidation(password).hasSpecialChar ? "#4CAF50" : "#F44336"} 
+                        />
+                        <Text style={[styles.validationText, {color: getPasswordValidation(password).hasSpecialChar ? "#4CAF50" : "#F44336"}]}>
+                            Special character (!@#$%^&*)
+                        </Text>
+                    </View>
+                </View>
+            )}
+
             {/* Confirm Password */}
             <View style={styles.inputContainer}>
                 <TextInput
@@ -146,6 +228,20 @@ export default function CreateNewPassword() {
                     />
                 </TouchableOpacity>
             </View>
+
+            {/* Password Match Indicator */}
+            {confirm.length > 0 && (
+                <View style={styles.validationRow}>
+                    <Ionicons 
+                        name={password === confirm ? "checkmark-circle" : "close-circle"} 
+                        size={16} 
+                        color={password === confirm ? "#4CAF50" : "#F44336"} 
+                    />
+                    <Text style={[styles.validationText, {color: password === confirm ? "#4CAF50" : "#F44336"}]}>
+                        {password === confirm ? "Passwords match" : "Passwords do not match"}
+                    </Text>
+                </View>
+            )}
 
             <TouchableOpacity 
                 style={[styles.button, loading && styles.buttonDisabled]} 
@@ -197,6 +293,19 @@ const styles = StyleSheet.create({
     },
     icon: {
         padding: 5,
+    },
+    validationContainer: {
+        marginBottom: 20,
+    },
+    validationRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 6,
+        gap: 6,
+    },
+    validationText: {
+        fontSize: 12,
+        fontWeight: "500",
     },
     button: {
         backgroundColor: "#008080",

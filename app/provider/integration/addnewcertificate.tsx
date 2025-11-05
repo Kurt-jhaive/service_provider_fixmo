@@ -110,10 +110,30 @@ export default function AddNewCertificate() {
         } catch (error: any) {
             // Handle errors including duplicate certificates
             const errorMessage = error.message || 'Failed to upload certificate';
+            
+            // Check if it's a duplicate certificate error
             if (errorMessage.toLowerCase().includes('duplicate') || 
-                errorMessage.toLowerCase().includes('already exists') ||
+                errorMessage.toLowerCase().includes('already have')) {
+                Alert.alert(
+                    'Certificate Already Exists', 
+                    'You already have this certificate type. You can only upload a new certificate if your existing one is rejected or expired. Please check your certificates list.',
+                    [
+                        {
+                            text: 'View Certificates',
+                            onPress: () => router.push('/provider/onboarding/mycertificate'),
+                        },
+                        {
+                            text: 'Cancel',
+                            style: 'cancel',
+                        }
+                    ]
+                );
+            } else if (errorMessage.toLowerCase().includes('already exists') ||
                 errorMessage.toLowerCase().includes('already uploaded')) {
-                Alert.alert('Duplicate Certificate', 'This certificate has already been uploaded to your account.');
+                Alert.alert(
+                    'Duplicate Certificate', 
+                    'This certificate has already been uploaded to your account.'
+                );
             } else {
                 Alert.alert('Upload Error', errorMessage);
             }
