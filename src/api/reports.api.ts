@@ -17,6 +17,7 @@ export interface ReportSubmission {
   customer_name?: string;
   customer_email?: string;
   customer_phone?: string;
+  violation_id?: string; // For penalty/violation reports
   images?: Array<{
     uri: string;
     type: string;
@@ -73,6 +74,9 @@ export const submitProviderReport = async (
     }
     if (reportData.customer_phone) {
       formData.append('customer_phone', reportData.customer_phone);
+    }
+    if (reportData.violation_id) {
+      formData.append('violation_id', reportData.violation_id);
     }
     
     // Add images if provided

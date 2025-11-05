@@ -31,8 +31,10 @@ const alwaysAvailable: MenuItem[] = [
     {label: "Edit Profile", icon: "create", route: "/provider/onboarding/editprofile"},
     {label: "Certificates", icon: "document-text", route: "/provider/onboarding/mycertificate"},
     {label: "Services", icon: "list", route: "/provider/onboarding/services"},
+    {label: "Fix-Score", icon: "speedometer", route: "/provider/integration/penalty-score-details"},
     {label: "Report an Issue", icon: "flag", route: "/provider/integration/report"},
     {label: "Privacy Policy", icon: "shield", route: "/provider/integration/privacypolicy"},
+    {label: "Terms and Conditions", icon: "document-text-outline", route: "/provider/integration/termsandconditions"},
     {label: "Log Out", icon: "log-out"}, // triggers logout modal
 
 ];
@@ -444,6 +446,10 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: "#666",
         fontFamily: "PoppinsRegular",
+    },
+    fixScoreContainer: {
+        marginTop: 10,
+        marginBottom: 20,
     },
     menuList: {
         paddingHorizontal: 20,

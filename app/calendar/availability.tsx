@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFonts } from 'expo-font';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -19,6 +20,8 @@ import {
 import { addTimeRangeAvailability, deleteAvailability, getProviderAvailability, toggleDayAvailability, toggleTimeSlot } from '../../src/api/availability.api';
 import ApprovedScreenWrapper from '../../src/navigation/ApprovedScreenWrapper';
 import type { Availability, DayOfWeek } from '../../src/types/availability';
+import { canCreateBooking, getBookingLimit, getStatusText } from '../../src/utils/penaltyHelpers';
+import { getPenaltyInfo } from '../../src/utils/penaltyService';
 
 const DAYS_OF_WEEK: DayOfWeek[] = [
   'Monday',
@@ -41,6 +44,7 @@ const DAY_ICONS: Record<DayOfWeek, string> = {
 };
 
 export default function AvailabilityScreen() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
@@ -59,6 +63,11 @@ export default function AvailabilityScreen() {
     Saturday: false,
     Sunday: false,
   });
+  
+  // Fix-Score state
+  const [penaltyScore, setPenaltyScore] = useState<number>(100);
+  const [isSuspended, setIsSuspended] = useState<boolean>(false);
+  const [slotLimit, setSlotLimit] = useState<number | null>(null);
 
   const [fontsLoaded] = useFonts({
     PoppinsRegular: require('../assets/fonts/Poppins-Regular.ttf'),
@@ -66,6 +75,33 @@ export default function AvailabilityScreen() {
     PoppinsSemiBold: require('../assets/fonts/Poppins-SemiBold.ttf'),
     PoppinsMedium: require('../assets/fonts/Poppins-SemiBold.ttf'),
   });
+
+  // Fetch Fix-Score penalty info
+  const fetchPenaltyInfo = useCallback(async () => {
+    try {
+      const penaltyResponse = await getPenaltyInfo();
+      
+      if (penaltyResponse.success && penaltyResponse.data) {
+        const score = penaltyResponse.data.current_score || penaltyResponse.data.penalty_points || 100;
+        const suspended = penaltyResponse.data.is_suspended || false;
+        
+        setPenaltyScore(score);
+        setIsSuspended(suspended);
+        
+        // Calculate slot limit
+        const limit = getBookingLimit(score, 'provider');
+        setSlotLimit(limit);
+        
+        console.log('📊 Fix-Score loaded:', { score, suspended, limit });
+      }
+    } catch (error) {
+      console.error('Failed to fetch penalty info:', error);
+      // Default to no restrictions on error
+      setPenaltyScore(100);
+      setIsSuspended(false);
+      setSlotLimit(null);
+    }
+  }, []);
 
   const fetchAvailability = useCallback(async () => {
     try {
@@ -94,12 +130,14 @@ export default function AvailabilityScreen() {
 
   useEffect(() => {
     if (fontsLoaded) {
+      fetchPenaltyInfo();
       fetchAvailability();
     }
-  }, [fontsLoaded, fetchAvailability]);
+  }, [fontsLoaded, fetchAvailability, fetchPenaltyInfo]);
 
   const onRefresh = () => {
     setRefreshing(true);
+    fetchPenaltyInfo(); // Refresh Fix-Score data
     fetchAvailability();
   };
 
@@ -204,6 +242,42 @@ export default function AvailabilityScreen() {
 
   // Open add time slot modal
   const openAddModal = (day: DayOfWeek) => {
+    // Check if account is deactivated (≤50 points)
+    if (isSuspended || penaltyScore <= 50) {
+      Alert.alert(
+        'Account Deactivated',
+        'Your account has been deactivated due to your Fix-Score (≤50 points). You cannot create new time slots. Please contact admin support for reactivation.',
+        [
+          { text: 'View Fix-Score', onPress: () => router.push('/provider/integration/penalty-score-details') },
+          { text: 'OK', style: 'cancel' }
+        ]
+      );
+      return;
+    }
+
+    // Check slot limit restrictions (70 or 60 points)
+    if (slotLimit !== null) {
+      // Count today's active slots for the selected day
+      const todaySlots = getActiveTimeSlotsForDay(day);
+      
+      // Use canCreateBooking helper for validation
+      const validation = canCreateBooking(penaltyScore, 'provider', todaySlots.length);
+      
+      if (!validation.allowed) {
+        const statusText = getStatusText(penaltyScore, isSuspended);
+        
+        Alert.alert(
+          'Slot Limit Reached',
+          validation.message || `You can only create ${slotLimit} time slots per day with your current Fix-Score (${penaltyScore} - ${statusText}).`,
+          [
+            { text: 'View Fix-Score', onPress: () => router.push('/provider/integration/penalty-score-details') },
+            { text: 'OK', style: 'cancel' }
+          ]
+        );
+        return;
+      }
+    }
+
     setSelectedDay(day);
     
     // Find next available time starting from 9 AM
@@ -460,6 +534,42 @@ export default function AvailabilityScreen() {
             Add time slots for each day you're available
           </Text>
         </View>
+
+        {/* Fix-Score Status Banner */}
+        {(slotLimit !== null || isSuspended || penaltyScore <= 70) && (
+          <TouchableOpacity 
+            style={[
+              styles.fixScoreBanner,
+              isSuspended || penaltyScore <= 50 ? styles.fixScoreBannerDeactivated :
+              penaltyScore === 60 || (penaltyScore >= 51 && penaltyScore <= 59) ? styles.fixScoreBannerSevere :
+              styles.fixScoreBannerLimited
+            ]}
+            onPress={() => router.push('/provider/integration/penalty-score-details')}
+          >
+            <View style={styles.fixScoreBannerContent}>
+              <Ionicons 
+                name={isSuspended || penaltyScore <= 50 ? "alert-circle" : "warning"} 
+                size={24} 
+                color="#FFFFFF" 
+              />
+              <View style={styles.fixScoreBannerText}>
+                <Text style={styles.fixScoreBannerTitle}>
+                  {isSuspended || penaltyScore <= 50 ? 'Account Deactivated' :
+                   penaltyScore === 60 || (penaltyScore >= 51 && penaltyScore <= 59) ? 'Severe Restriction' :
+                   'Limited Scheduling'}
+                </Text>
+                <Text style={styles.fixScoreBannerSubtitle}>
+                  {isSuspended || penaltyScore <= 50 ? 
+                    'Cannot create slots. Admin review required.' :
+                   slotLimit !== null ? 
+                    `Fix-Score ${penaltyScore} - Maximum ${slotLimit} slots per day` :
+                    `Fix-Score ${penaltyScore} - Tap for details`}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Info Card */}
         <View style={styles.infoCard}>
@@ -749,6 +859,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'PoppinsRegular',
     color: '#666',
+  },
+  // Fix-Score Banner Styles
+  fixScoreBanner: {
+    borderRadius: 12,
+    marginBottom: 16,
+    padding: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  fixScoreBannerLimited: {
+    backgroundColor: '#FB923C', // Orange for 70 points
+  },
+  fixScoreBannerSevere: {
+    backgroundColor: '#EF4444', // Red for 60 points
+  },
+  fixScoreBannerDeactivated: {
+    backgroundColor: '#DC2626', // Dark red for ≤50 points
+  },
+  fixScoreBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fixScoreBannerText: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  fixScoreBannerTitle: {
+    fontSize: 15,
+    fontFamily: 'PoppinsBold',
+    color: '#FFFFFF',
+    marginBottom: 2,
+  },
+  fixScoreBannerSubtitle: {
+    fontSize: 13,
+    fontFamily: 'PoppinsRegular',
+    color: '#FFFFFF',
+    opacity: 0.95,
   },
   infoCard: {
     flexDirection: 'row',

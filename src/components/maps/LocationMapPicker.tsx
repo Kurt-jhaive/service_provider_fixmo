@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -34,10 +35,12 @@ const LocationMapPicker: React.FC<LocationMapPickerProps> = ({
   const [tempCoordinates, setTempCoordinates] = useState(initialCoordinates);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Update temp coordinates when initial coordinates change
+  // Only update temp coordinates when modal is not visible (not being interacted with)
   useEffect(() => {
-    setTempCoordinates(initialCoordinates);
-  }, [initialCoordinates]);
+    if (!mapModalVisible) {
+      setTempCoordinates(initialCoordinates);
+    }
+  }, [initialCoordinates, mapModalVisible]);
 
   const handleOpenMap = () => {
     setTempCoordinates(initialCoordinates);
@@ -181,18 +184,82 @@ const LocationMapPicker: React.FC<LocationMapPickerProps> = ({
     `;
   };
 
-  const handleWebViewMessage = (event: any) => {
+  const handleWebViewMessage = async (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.latitude && data.longitude) {
-        setTempCoordinates({
-          latitude: data.latitude,
-          longitude: data.longitude,
-        });
+        // Validate that the new coordinates are still within the selected area
+        const validationResult = await validateCoordinates(data.latitude, data.longitude);
+        
+        if (validationResult.isValid) {
+          setTempCoordinates({
+            latitude: data.latitude,
+            longitude: data.longitude,
+          });
+        } else {
+          // Reset to initial coordinates if outside boundary
+          setTempCoordinates(initialCoordinates);
+          Alert.alert(
+            'Location Outside Boundary',
+            `The pin must be within ${city}. ${validationResult.message || 'Please select a location within the selected city.'}\n\nLocation has been reset to the original position.`,
+            [{ text: 'OK' }]
+          );
+        }
       }
     } catch (error) {
       console.error('Error parsing webview message:', error);
     }
+  };
+
+  // Validate if coordinates are within the selected city/barangay
+  const validateCoordinates = async (lat: number, lng: number): Promise<{isValid: boolean, message?: string}> => {
+    try {
+      // Calculate distance from original coordinates (in meters)
+      const distance = calculateDistance(
+        initialCoordinates.latitude,
+        initialCoordinates.longitude,
+        lat,
+        lng
+      );
+
+      // Skip validation for very small movements (less than 50 meters)
+      // This allows fine-tuning the pin without triggering validation
+      if (distance < 50) {
+        return { isValid: true };
+      }
+
+      // Allow movement within 1km radius (reasonable for same barangay/area)
+      if (distance > 1000) {
+        return { 
+          isValid: false, 
+          message: `Location is too far (${(distance/1000).toFixed(1)}km away). Please stay within your selected area.` 
+        };
+      }
+
+      // If within 1km, assume it's valid without reverse geocoding
+      // This avoids API calls and false positives for nearby locations
+      return { isValid: true };
+    } catch (error) {
+      console.error('Validation error:', error);
+      // If validation fails, allow the change
+      return { isValid: true };
+    }
+  };
+
+  // Calculate distance between two coordinates (Haversine formula)
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
   };
 
   return (

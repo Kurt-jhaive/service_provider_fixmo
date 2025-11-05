@@ -1,3 +1,4 @@
+import { getDetailedProviderProfile } from '@/api/auth.api';
 import { submitProviderReport } from '@/api/reports.api';
 import { API_CONFIG } from "@/constants/config";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,19 +8,21 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getStatusText } from '../../../src/utils/penaltyHelpers';
+import { getPenaltyInfo, getViolationHistory } from '../../../src/utils/penaltyService';
 
 const BACKEND_URL = API_CONFIG.BASE_URL;
 
@@ -48,6 +51,10 @@ const ProviderReportForm = () => {
   const [appointmentId, setAppointmentId] = useState("");
   const [customerId, setCustomerId] = useState("");
   
+  // Penalty/violation selection
+  const [selectedViolationId, setSelectedViolationId] = useState("");
+  const [violations, setViolations] = useState<any[]>([]);
+  
   // Customer information (auto-filled from selected appointment)
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
@@ -57,38 +64,112 @@ const ProviderReportForm = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [isDeactivated, setIsDeactivated] = useState(false);
+  
+  // Penalty/Fix-Score information
+  const [penaltyScore, setPenaltyScore] = useState<number>(100);
+  const [isSuspended, setIsSuspended] = useState<boolean>(false);
+  const [penaltyStatus, setPenaltyStatus] = useState<string>('GOOD STANDING');
 
   // Load provider data and appointments
   useEffect(() => {
     loadProviderData();
   }, []);
 
+  // Load violations when "Penalties" report type is selected
+  useEffect(() => {
+    if (reportType === 'penalties') {
+      loadViolations();
+    }
+  }, [reportType]);
+
+  const loadViolations = async () => {
+    try {
+      console.log('📋 Loading violations for penalty report...');
+      const response = await getViolationHistory(null, 50, 0); // Get up to 50 violations
+      if (response.success && response.data && response.data.violations) {
+        setViolations(response.data.violations);
+        console.log('✅ Loaded violations:', response.data.violations.length);
+      } else {
+        console.error('❌ Failed to load violations:', response.error);
+        setViolations([]);
+      }
+    } catch (error) {
+      console.error('❌ Error loading violations:', error);
+      setViolations([]);
+    }
+  };
+
   const loadProviderData = async () => {
     try {
+      setLoadingProfile(true);
       const token = await AsyncStorage.getItem('providerToken');
-      if (token) {
-        // Fetch provider profile
-        const profileResponse = await fetch(`${BACKEND_URL}/auth/provider/profile-detailed`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
+      
+      if (!token) {
+        console.error('❌ No provider token found');
+        Alert.alert('Error', 'Please log in again');
+        return;
+      }
+
+      console.log('🔄 Loading provider profile data...');
+      
+      try {
+        // Fetch provider profile using the proper API function
+        const providerData = await getDetailedProviderProfile(token);
+        
+        console.log('✅ Provider profile loaded:', {
+          firstName: providerData.first_name,
+          lastName: providerData.last_name,
+          email: providerData.email,
+          phone: providerData.phone_number
         });
 
-        if (profileResponse.ok) {
-          const result = await profileResponse.json();
-          const providerData = result.data || result.provider;
-          if (providerData) {
-            setReporterName(`${providerData.first_name} ${providerData.last_name}`);
-            setReporterEmail(providerData.email || '');
-            setReporterPhone(providerData.phone_number || '');
-          }
+        if (providerData) {
+          const fullName = `${providerData.first_name || ''} ${providerData.last_name || ''}`.trim();
+          setReporterName(fullName || 'N/A');
+          setReporterEmail(providerData.email || '');
+          setReporterPhone(providerData.phone_number || '');
+          
+          // Check if account is deactivated
+          setIsDeactivated(providerData.is_activated === false);
+          
+          console.log('✅ Reporter fields set:', {
+            name: fullName,
+            email: providerData.email,
+            phone: providerData.phone_number
+          });
+        } else {
+          console.error('❌ No provider data returned from API');
+          Alert.alert('Error', 'Failed to load profile data');
         }
+      } catch (profileError: any) {
+        console.error('❌ Error loading provider profile:', profileError);
+        Alert.alert('Profile Error', profileError.message || 'Failed to load your profile information');
+      }
 
-        // Fetch provider's appointments
+      // Fetch penalty/Fix-Score information
+      try {
+        const penaltyResponse = await getPenaltyInfo();
+        if (penaltyResponse.success && penaltyResponse.data) {
+          const score = penaltyResponse.data.current_score || penaltyResponse.data.penalty_points || 100;
+          const suspended = penaltyResponse.data.is_suspended || false;
+          
+          setPenaltyScore(score);
+          setIsSuspended(suspended);
+          setPenaltyStatus(getStatusText(score, suspended));
+          
+          console.log('📊 Fix-Score loaded for report:', { score, suspended, status: getStatusText(score, suspended) });
+        }
+      } catch (penaltyError) {
+        console.error('⚠️ Error loading penalty info (non-critical):', penaltyError);
+        // Don't show error to user, penalty info is optional
+      }
+
+      // Fetch provider's appointments
+      try {
         const providerId = await AsyncStorage.getItem('providerId');
         if (providerId) {
+          console.log('🔄 Loading appointments for provider:', providerId);
           const appointmentsResponse = await fetch(`${BACKEND_URL}/api/appointments/provider/${providerId}`, {
             method: 'GET',
             headers: {
@@ -111,12 +192,21 @@ const ProviderReportForm = () => {
                 customer_phone: apt.user?.phone_number,
               }));
               setAppointments(formattedAppointments);
+              console.log('✅ Loaded appointments:', formattedAppointments.length);
             }
+          } else {
+            console.warn('⚠️ Failed to load appointments:', appointmentsResponse.status);
           }
+        } else {
+          console.warn('⚠️ No provider ID found in storage');
         }
+      } catch (appointmentsError) {
+        console.error('⚠️ Error loading appointments (non-critical):', appointmentsError);
+        // Don't show error to user, appointments are optional
       }
     } catch (error) {
-      console.error('Error loading provider data:', error);
+      console.error('❌ Error in loadProviderData:', error);
+      Alert.alert('Error', 'Failed to load some data. Please try again.');
     } finally {
       setLoadingProfile(false);
     }
@@ -213,8 +303,17 @@ const ProviderReportForm = () => {
       Alert.alert("Error", "Please enter a valid email address");
       return false;
     }
+    if (!reporterPhone.trim()) {
+      Alert.alert("Error", "Please enter your phone number");
+      return false;
+    }
     if (!reportType) {
       Alert.alert("Error", "Please select a report type");
+      return false;
+    }
+    // If Penalties report type, require violation selection
+    if (reportType === 'penalties' && !selectedViolationId) {
+      Alert.alert("Error", "Please select a penalty violation to report");
       return false;
     }
     if (!subject.trim()) {
@@ -292,6 +391,7 @@ const ProviderReportForm = () => {
         customer_name: customerName.trim() || undefined,
         customer_email: customerEmail.trim() || undefined,
         customer_phone: customerPhone.trim() || undefined,
+        violation_id: selectedViolationId || undefined, // Include violation ID for penalties reports
         images: preparedImages.length > 0 ? preparedImages : undefined,
       });
 
@@ -306,7 +406,10 @@ const ProviderReportForm = () => {
           [
             {
               text: "OK",
-              onPress: () => router.back(),
+              onPress: () => {
+                // Always go to pre_homepage for safety - avoids otp.tsx issue
+                router.replace('/provider/onboarding/pre_homepage');
+              },
             }
           ]
         );
@@ -375,7 +478,13 @@ const ProviderReportForm = () => {
           borderBottomWidth: 1,
           borderBottomColor: '#ddd',
         }}>
-          <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 15 }}>
+          <TouchableOpacity 
+            onPress={() => {
+              // Always go to pre_homepage for safety - avoids otp.tsx issue
+              router.replace('/provider/onboarding/pre_homepage');
+            }} 
+            style={{ marginRight: 15 }}
+          >
             <Ionicons name="arrow-back" size={24} color="#008080" />
           </TouchableOpacity>
           <Text style={{ fontSize: 18, fontWeight: 'bold', color: 'black', flex: 1, fontFamily: "PoppinsSemiBold" }}>
@@ -388,15 +497,54 @@ const ProviderReportForm = () => {
             Submit a report about bugs, complaints, feedback, or other issues. Our admin team will review and respond via email.
           </Text>
 
+          {/* Fix-Score/Penalty Information Banner */}
+          <View style={[
+            styles.penaltyInfoBox,
+            isSuspended || penaltyScore <= 50 ? styles.penaltyInfoDeactivated :
+            penaltyScore <= 60 ? styles.penaltyInfoSevere :
+            penaltyScore <= 70 ? styles.penaltyInfoLimited :
+            styles.penaltyInfoGood
+          ]}>
+            <View style={styles.penaltyInfoHeader}>
+              <Ionicons 
+                name={isSuspended || penaltyScore <= 50 ? "alert-circle" : 
+                      penaltyScore <= 60 ? "warning" : 
+                      penaltyScore <= 70 ? "information-circle" : 
+                      "checkmark-circle"} 
+                size={24} 
+                color="#FFFFFF" 
+              />
+              <Text style={styles.penaltyInfoTitle}>Your Fix-Score Information</Text>
+            </View>
+            <View style={styles.penaltyInfoContent}>
+              <View style={styles.penaltyInfoRow}>
+                <Text style={styles.penaltyInfoLabel}>Fix-Score:</Text>
+                <Text style={styles.penaltyInfoValue}>{penaltyScore} / 100</Text>
+              </View>
+              <View style={styles.penaltyInfoRow}>
+                <Text style={styles.penaltyInfoLabel}>Status:</Text>
+                <Text style={styles.penaltyInfoValue}>{penaltyStatus}</Text>
+              </View>
+              {(isSuspended || penaltyScore <= 50) && (
+                <View style={styles.penaltyWarning}>
+                  <Text style={styles.penaltyWarningText}>
+                    ⚠️ Your account is deactivated. This information will be included in your report.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+
           {/* Reporter Name */}
           <Text style={styles.label}>
             Your Name <Text style={{ color: "red" }}>*</Text>
           </Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.inputDisabled]}
             placeholder="Enter your full name"
             value={reporterName}
             onChangeText={setReporterName}
+            editable={false}
           />
 
           {/* Reporter Email */}
@@ -404,22 +552,26 @@ const ProviderReportForm = () => {
             Email Address <Text style={{ color: "red" }}>*</Text>
           </Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.inputDisabled]}
             placeholder="your.email@example.com"
             value={reporterEmail}
             keyboardType="email-address"
             autoCapitalize="none"
             onChangeText={setReporterEmail}
+            editable={false}
           />
 
-          {/* Reporter Phone (Optional) */}
-          <Text style={styles.label}>Phone Number (Optional)</Text>
+          {/* Reporter Phone (Now Required) */}
+          <Text style={styles.label}>
+            Phone Number <Text style={{ color: "red" }}>*</Text>
+          </Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.inputDisabled]}
             placeholder="+63 9XX XXX XXXX"
             value={reporterPhone}
             keyboardType="phone-pad"
             onChangeText={setReporterPhone}
+            editable={false}
           />
 
           {/* Report Type */}
@@ -438,9 +590,53 @@ const ProviderReportForm = () => {
               <Picker.Item label="👤 Account Issue" value="account_issue" />
               <Picker.Item label="👥 Customer Issue" value="customer_issue" />
               <Picker.Item label="⚠️ Safety Concern" value="safety_concern" />
+              <Picker.Item label="⚡ Penalties" value="penalties" />
               <Picker.Item label="📋 Other" value="other" />
             </Picker>
           </View>
+
+          {/* Violation Selection - Show when Penalties report type is selected */}
+          {reportType === 'penalties' && (
+            <>
+              <Text style={styles.label}>
+                Select Penalty Violation <Text style={{ color: "red" }}>*</Text>
+              </Text>
+              <View style={styles.pickerWrapper}>
+                <Picker
+                  selectedValue={selectedViolationId}
+                  onValueChange={(val) => setSelectedViolationId(val)}
+                >
+                  <Picker.Item label="Select a penalty violation..." value="" />
+                  {violations.map((violation) => {
+                    const date = new Date(violation.created_at || violation.violation_date).toLocaleDateString();
+                    const points = violation.points_deducted || violation.penalty_points || 0;
+                    const reason = violation.violation_reason || violation.reason || 'Violation';
+                    const status = violation.status || 'PENDING';
+                    const label = `${reason} (-${points} pts) - ${date} [${status}]`;
+                    return (
+                      <Picker.Item 
+                        key={violation.violation_id || violation.id} 
+                        label={label} 
+                        value={(violation.violation_id || violation.id).toString()} 
+                      />
+                    );
+                  })}
+                  {violations.length === 0 && (
+                    <Picker.Item label="No penalty violations found" value="" />
+                  )}
+                </Picker>
+              </View>
+              
+              {selectedViolationId && (
+                <View style={styles.infoBox}>
+                  <Ionicons name="information-circle" size={20} color="#008080" />
+                  <Text style={styles.infoText}>
+                    You selected a penalty violation to report. Please provide detailed information below.
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
 
           {/* Appointment Selection - Conditional */}
           {(reportType === 'complaint' || reportType === 'customer_issue' || reportType === 'payment_issue') && (
@@ -638,6 +834,81 @@ const styles = StyleSheet.create({
     fontSize: 14,
     backgroundColor: "#fafafa",
     fontFamily: "PoppinsRegular",
+  },
+  inputDisabled: {
+    backgroundColor: "#f5f5f5",
+    color: "#666",
+  },
+  // Penalty/Fix-Score Info Styles
+  penaltyInfoBox: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  penaltyInfoGood: {
+    backgroundColor: '#10B981',
+  },
+  penaltyInfoLimited: {
+    backgroundColor: '#FB923C',
+  },
+  penaltyInfoSevere: {
+    backgroundColor: '#EF4444',
+  },
+  penaltyInfoDeactivated: {
+    backgroundColor: '#DC2626',
+  },
+  penaltyInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  penaltyInfoTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginLeft: 10,
+    fontFamily: 'PoppinsBold',
+  },
+  penaltyInfoContent: {
+    gap: 8,
+  },
+  penaltyInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  penaltyInfoLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    fontFamily: 'PoppinsSemiBold',
+  },
+  penaltyInfoValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: 'PoppinsBold',
+  },
+  penaltyWarning: {
+    marginTop: 8,
+    padding: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 8,
+  },
+  penaltyWarningText: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontFamily: 'PoppinsSemiBold',
+    lineHeight: 18,
   },
   pickerWrapper: {
     borderWidth: 1,

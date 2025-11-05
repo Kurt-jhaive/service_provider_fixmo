@@ -9,6 +9,7 @@ import {
     ActivityIndicator,
     Alert,
     BackHandler,
+    Modal,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -52,6 +53,7 @@ export default function Homepage() {
     const [providerProfile, setProviderProfile] = useState<ProviderProfile | null>(null);
     const [ongoingAppointment, setOngoingAppointment] = useState<Appointment | null>(null);
     const [availabilities, setAvailabilities] = useState<Availability[]>([]);
+    const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
 
     // Load fonts
     const [fontsLoaded] = useFonts({
@@ -93,6 +95,11 @@ export default function Homepage() {
 
                 if (profile) {
                     setProviderProfile(profile);
+                    
+                    // Check if account is deactivated - show modal
+                    if (profile.is_activated === false) {
+                        setShowDeactivatedModal(true);
+                    }
                 } else {
                     throw new Error('Invalid profile data');
                 }
@@ -219,6 +226,45 @@ export default function Homepage() {
         ? (providerProfile.full_name?.trim() || `${providerProfile.first_name ?? ""} ${providerProfile.last_name ?? ""}`.trim() || providerProfile.userName)
         : "User";
 
+    // Format location - remove "National Capital Region" and convert to title case
+    const formatLocation = (location: string | null | undefined): string => {
+        if (!location) return '';
+        
+        // Split by comma and take only relevant parts (exclude "National Capital Region")
+        const parts = location.split(',').map(part => part.trim());
+        const filtered = parts.filter(part => 
+            !part.toLowerCase().includes('national capital region') && 
+            !part.toLowerCase().includes('ncr')
+        );
+        
+        // Convert to title case (capitalize first letter of each word)
+        const titleCase = filtered.map(part => 
+            part.toLowerCase().split(' ').map(word => 
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ')
+        ).join(', ');
+        
+        return titleCase;
+    };
+
+    // Handle appeal button - navigate to report page
+    const handleAppeal = () => {
+        setShowDeactivatedModal(false);
+        router.push('/provider/integration/report' as any);
+    };
+
+    // Handle logout button
+    const handleLogout = async () => {
+        try {
+            await AsyncStorage.multiRemove(['providerToken', 'providerId', 'providerUserName']);
+            setShowDeactivatedModal(false);
+            router.replace('/provider/onboarding/signin');
+        } catch (error) {
+            console.error('Logout error:', error);
+            Alert.alert('Error', 'Failed to logout. Please try again.');
+        }
+    };
+
     // Greeting
     const greetingText = (() => {
         const hour = new Date().getHours();
@@ -265,7 +311,7 @@ export default function Homepage() {
                             <Text style={styles.greeting}>{greetingText}</Text>
                             <Text style={styles.name}>{formattedName}</Text>
                             {providerProfile?.location && (
-                                <Text style={styles.locationText}>{providerProfile.location}</Text>
+                                <Text style={styles.locationText}>{formatLocation(providerProfile.location)}</Text>
                             )}
                             {typeof providerProfile?.rating === "number" && (
                                 <View style={styles.ratingRow}>
@@ -462,6 +508,50 @@ export default function Homepage() {
                 </View>
             </ScrollView>
 
+            {/* Deactivated Account Modal */}
+            <Modal
+                visible={showDeactivatedModal}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => {}}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.deactivatedModal}>
+                        <View style={styles.modalIconContainer}>
+                            <Ionicons name="warning-outline" size={60} color="#FF5252" />
+                        </View>
+                        
+                        <Text style={styles.modalTitle}>Account Deactivated</Text>
+                        
+                        <Text style={styles.modalMessage}>
+                            Your account has been deactivated. This may be due to violations of our terms of service or community guidelines.
+                        </Text>
+                        
+                        <Text style={styles.modalSubmessage}>
+                            You can submit an appeal to have your account reviewed, or logout to exit the application.
+                        </Text>
+
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity 
+                                style={styles.appealButton}
+                                onPress={handleAppeal}
+                            >
+                                <Ionicons name="document-text-outline" size={20} color="#fff" />
+                                <Text style={styles.appealButtonText}>Submit Appeal</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity 
+                                style={styles.logoutButton}
+                                onPress={handleLogout}
+                            >
+                                <Ionicons name="log-out-outline" size={20} color="#FF5252" />
+                                <Text style={styles.logoutButtonText}>Logout</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
         </ApprovedScreenWrapper>
     );
 }
@@ -606,6 +696,90 @@ const styles = StyleSheet.create({
     },
     iconButton: {
         padding: 4,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.6)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 20,
+    },
+    deactivatedModal: {
+        backgroundColor: "#fff",
+        borderRadius: 20,
+        padding: 30,
+        width: "100%",
+        maxWidth: 400,
+        shadowColor: "#000",
+        shadowOpacity: 0.3,
+        shadowOffset: { width: 0, height: 4 },
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    modalIconContainer: {
+        alignItems: "center",
+        marginBottom: 20,
+    },
+    modalTitle: {
+        fontSize: 24,
+        fontFamily: "PoppinsBold",
+        color: "#FF5252",
+        textAlign: "center",
+        marginBottom: 15,
+    },
+    modalMessage: {
+        fontSize: 15,
+        fontFamily: "PoppinsRegular",
+        color: "#333",
+        textAlign: "center",
+        lineHeight: 22,
+        marginBottom: 12,
+    },
+    modalSubmessage: {
+        fontSize: 13,
+        fontFamily: "PoppinsRegular",
+        color: "#666",
+        textAlign: "center",
+        lineHeight: 20,
+        marginBottom: 25,
+    },
+    modalButtons: {
+        gap: 12,
+    },
+    appealButton: {
+        backgroundColor: "#00796B",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 14,
+        borderRadius: 12,
+        gap: 8,
+        shadowColor: "#000",
+        shadowOpacity: 0.1,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    appealButtonText: {
+        color: "#fff",
+        fontSize: 16,
+        fontFamily: "PoppinsSemiBold",
+    },
+    logoutButton: {
+        backgroundColor: "#fff",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 14,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: "#FF5252",
+        gap: 8,
+    },
+    logoutButtonText: {
+        color: "#FF5252",
+        fontSize: 16,
+        fontFamily: "PoppinsSemiBold",
     },
     modalBackground: {flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center"},
     modalCard: {backgroundColor: "#EDEDED", borderRadius: 16, padding: 16, width: "90%", maxHeight: "85%"},

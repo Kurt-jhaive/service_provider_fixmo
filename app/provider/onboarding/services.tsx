@@ -6,7 +6,6 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Picker } from "@react-native-picker/picker";
-import * as SplashScreen from 'expo-splash-screen';
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -315,29 +314,33 @@ export default function AddServices() {
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.push("/provider/integration/myservices")}>
-                    <Text style={styles.headerTitle}>Add Services</Text>
+                    <Ionicons name="arrow-back" size={24} color="#1e6355" />
                 </TouchableOpacity>
+                <Text style={styles.headerTitle}>Add Services</Text>
+                <View style={{ width: 24 }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContainer}>
                 {/* Certificates Section - FIRST */}
-                <Text style={styles.label}>Certificate*</Text>
-                <Text style={{ color: "#666", fontSize: 12, marginBottom: 8 }}>
+                <Text style={styles.label}>
+                    Certificate<Text style={styles.asterisk}>*</Text>
+                </Text>
+                <Text style={styles.helperText}>
                     Select which certificate this service is for
                 </Text>
                 {selectedCertificate ? (
                     <View style={styles.certificateCard}>
-                        <Ionicons name="document-text-outline" size={20} color="#1e6355" />
-                        <Text style={{ marginLeft: 8, flex: 1 }}>{selectedCertificate.title}</Text>
+                        <Ionicons name="document-text" size={24} color="#1e6355" />
+                        <Text style={styles.certificateCardText}>{selectedCertificate.title}</Text>
                         {approvedCertificates.length > 1 && (
                             <TouchableOpacity onPress={() => setShowApprovedList(!showApprovedList)}>
-                                <Ionicons name="pencil" size={18} color="#1e6355" />
+                                <Ionicons name="chevron-down" size={20} color="#1e6355" />
                             </TouchableOpacity>
                         )}
                     </View>
                 ) : (
                     <View>
-                        <Text style={{ color: "#888", marginTop: 8, marginBottom: 8 }}>
+                        <Text style={styles.noCertText}>
                             No certificate selected.
                         </Text>
                         <TouchableOpacity
@@ -353,9 +356,11 @@ export default function AddServices() {
                 {showApprovedList && (
                     <View style={styles.dropdownWrapper}>
                         {approvedCertificates.length === 0 ? (
-                            <Text style={{ padding: 12, color: '#888' }}>
-                                No approved certificates found. Please upload and wait for approval.
-                            </Text>
+                            <View style={{ padding: 16 }}>
+                                <Text style={styles.noCertText}>
+                                    No approved certificates found. Please upload and wait for approval.
+                                </Text>
+                            </View>
                         ) : (
                             approvedCertificates.map((cert) => (
                                 <TouchableOpacity
@@ -363,7 +368,9 @@ export default function AddServices() {
                                     style={styles.certOption}
                                     onPress={() => handleCertificateSelect(cert)}
                                 >
-                                    <Text>{cert.title}</Text>
+                                    <Ionicons name="document-text" size={20} color="#1e6355" />
+                                    <Text style={styles.certOptionText}>{cert.title}</Text>
+                                    <Ionicons name="chevron-forward" size={20} color="#999" />
                                 </TouchableOpacity>
                             ))
                         )}
@@ -373,8 +380,10 @@ export default function AddServices() {
                 {/* Service Selection - SECOND (filtered based on certificate) */}
                 {selectedCertificate && (
                     <>
-                        <Text style={styles.label}>Service*</Text>
-                        <Text style={{ color: "#666", fontSize: 12, marginBottom: 8 }}>
+                        <Text style={styles.label}>
+                            Service<Text style={styles.asterisk}>*</Text>
+                        </Text>
+                        <Text style={styles.helperText}>
                             Choose from available services for {selectedCertificate.title}
                         </Text>
                         <View style={[
@@ -399,21 +408,32 @@ export default function AddServices() {
                         
                         {/* Show price range when service is selected */}
                         {selectedServiceDetail && (
-                            <Text style={styles.priceRange}>
-                                Price range: ₱{selectedServiceDetail.startingPrice.min} - ₱{selectedServiceDetail.startingPrice.max}
-                            </Text>
+                            <View style={styles.priceRangeBox}>
+                                <Ionicons name="information-circle" size={16} color="#1e6355" />
+                                <Text style={styles.priceRange}>
+                                    Price range: ₱{selectedServiceDetail.startingPrice.min} - ₱{selectedServiceDetail.startingPrice.max}
+                                </Text>
+                            </View>
                         )}
                         
                         {availableServices.length === 0 && (
-                            <Text style={{ color: "#ff6b6b", marginTop: 8, fontSize: 12 }}>
-                                No services available for this certificate or all services have been added.
-                            </Text>
+                            <View style={styles.warningBox}>
+                                <Ionicons name="alert-circle" size={18} color="#ff6b6b" />
+                                <Text style={styles.warningText}>
+                                    No services available for this certificate or all services have been added.
+                                </Text>
+                            </View>
                         )}
                     </>
                 )}
 
                 {/* Description */}
-                <Text style={styles.label}>Service Description*</Text>
+                <Text style={styles.label}>
+                    Service Description<Text style={styles.asterisk}>*</Text>
+                </Text>
+                <Text style={styles.helperText}>
+                    Describe what's included in your service
+                </Text>
                 <TextInput
                     style={styles.textArea}
                     multiline
@@ -424,21 +444,46 @@ export default function AddServices() {
                 />
 
                 {/* Image Upload */}
-                <Text style={styles.label}>Service Image*</Text>
+                <Text style={styles.label}>
+                    Service Images<Text style={styles.asterisk}>*</Text>
+                </Text>
+                <Text style={styles.helperText}>
+                    Upload up to 5 landscape images showcasing your work
+                </Text>
                 <TouchableOpacity style={styles.imageUpload} onPress={pickImage}>
-                    <Ionicons name="cloud-upload-outline" size={32} color="#1e6355" />
+                    <Ionicons name="cloud-upload-outline" size={40} color="#1e6355" />
                     <Text style={styles.uploadText}>
-                        Add up to 5 images {"\n"}(Landscape only)
+                        Tap to add images{"\n"}(Landscape format recommended)
                     </Text>
                 </TouchableOpacity>
-                <View style={styles.imageRow}>
-                    {images.map((img, i) => (
-                        <Image key={i} source={{ uri: img.uri }} style={styles.uploadedImage} />
-                    ))}
-                </View>
+                {images.length > 0 && (
+                    <View style={styles.imageRow}>
+                        {images.map((img, i) => (
+                            <View key={i} style={styles.imagePreviewContainer}>
+                                <Image source={{ uri: img.uri }} style={styles.uploadedImage} />
+                                <TouchableOpacity
+                                    style={styles.removeImageButton}
+                                    onPress={() => setImages(images.filter((_, index) => index !== i))}
+                                >
+                                    <Ionicons name="close-circle" size={24} color="#ff6b6b" />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
+                    </View>
+                )}
+                {images.length > 0 && (
+                    <Text style={styles.imageCountText}>
+                        {images.length} of 5 images uploaded
+                    </Text>
+                )}
 
                 {/* Price */}
-                <Text style={styles.label}>Starting Price (₱)*</Text>
+                <Text style={styles.label}>
+                    Starting Price (₱)<Text style={styles.asterisk}>*</Text>
+                </Text>
+                <Text style={styles.helperText}>
+                    Set your base price for this service
+                </Text>
                 <TextInput
                     style={styles.inputBox}
                     keyboardType="numeric"
@@ -472,112 +517,234 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: "row",
         alignItems: "center",
+        justifyContent: "space-between",
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: "#ddd",
-        justifyContent: "center",
+        backgroundColor: "#fff",
     },
-    headerTitle: { fontSize: 18, fontFamily: "Poppins_600SemiBold" },
+    headerTitle: { 
+        fontSize: 18, 
+        fontFamily: "Poppins_600SemiBold",
+        color: "#000",
+    },
     scrollContainer: {
         flexGrow: 1,
         padding: 20,
         paddingBottom: 140,
     },
     label: {
-        fontFamily: "Poppins_400Regular",
+        fontFamily: "Poppins_600SemiBold",
         fontSize: 14,
-        marginBottom: 6,
-        marginTop: 12,
+        color: "#000",
+        marginBottom: 8,
+        marginTop: 16,
+    },
+    asterisk: {
+        color: "#ff0000",
+        fontSize: 14,
+        marginLeft: 2,
+    },
+    helperText: {
+        fontFamily: "Poppins_400Regular",
+        fontSize: 12,
+        color: "#666",
+        marginBottom: 12,
+        lineHeight: 16,
+    },
+    noCertText: {
+        fontFamily: "Poppins_400Regular",
+        fontSize: 13,
+        color: "#999",
+        marginTop: 4,
+        marginBottom: 12,
     },
     priceRange: {
         fontFamily: "Poppins_400Regular",
         fontSize: 12,
         color: "#1e6355",
-        marginTop: 4,
-        marginBottom: 8,
+        marginTop: -4,
+        marginBottom: 12,
+        fontStyle: "italic",
     },
     inputBox: {
         borderWidth: 1,
         borderColor: "#E0E0E0",
         borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        marginBottom: 10,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        marginBottom: 12,
+        fontFamily: "Poppins_400Regular",
+        fontSize: 14,
+        backgroundColor: "#fff",
     },
     pickerContainer: {
         borderWidth: 1,
         borderColor: "#E0E0E0",
         borderRadius: 12,
-        marginBottom: 10,
+        marginBottom: 12,
         overflow: "hidden",
+        backgroundColor: "#fff",
     },
     picker: {
         height: 50,
+        fontFamily: "Poppins_400Regular",
     },
     certificateCard: {
         flexDirection: "row",
         alignItems: "center",
-        padding: 12,
-        marginTop: 10,
-        borderRadius: 10,
+        padding: 16,
+        marginTop: 8,
+        marginBottom: 12,
+        borderRadius: 12,
         backgroundColor: "#e0f7f7",
+        borderWidth: 1,
+        borderColor: "#b3e0e0",
+    },
+    certificateCardText: {
+        fontFamily: "Poppins_600SemiBold",
+        fontSize: 14,
+        color: "#1e6355",
+        marginLeft: 12,
+        flex: 1,
     },
     addButton: {
-        backgroundColor: "#e0f7f7",
+        backgroundColor: "#1e6355",
         paddingVertical: 12,
-        paddingHorizontal: 20,
+        paddingHorizontal: 24,
         borderRadius: 30,
-        alignSelf: "center",
-        marginTop: 20,
+        alignSelf: "flex-start",
+        marginTop: 8,
+        elevation: 2,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
     },
-    addButtonText: { color: "#1e6355", fontWeight: "bold", fontSize: 14 },
+    addButtonText: { 
+        color: "#fff", 
+        fontWeight: "bold", 
+        fontSize: 14,
+        fontFamily: "Poppins_600SemiBold",
+    },
     dropdownWrapper: {
-        marginTop: 10,
+        marginTop: 12,
+        marginBottom: 12,
         borderWidth: 1,
-        borderColor: "#ddd",
-        borderRadius: 10,
+        borderColor: "#E0E0E0",
+        borderRadius: 12,
         backgroundColor: "#fafafa",
+        overflow: "hidden",
     },
     certOption: {
-        padding: 12,
+        padding: 16,
         borderBottomWidth: 1,
         borderBottomColor: "#eee",
+        flexDirection: "row",
+        alignItems: "center",
+    },
+    certOptionText: {
+        fontFamily: "Poppins_400Regular",
+        fontSize: 14,
+        color: "#333",
+        marginLeft: 12,
+        flex: 1,
+    },
+    priceRangeBox: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#f0fafa",
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 4,
+        marginBottom: 12,
+        gap: 8,
+    },
+    warningBox: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        backgroundColor: "#fff5f5",
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 8,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: "#ffcccc",
+        gap: 8,
+    },
+    warningText: {
+        fontFamily: "Poppins_400Regular",
+        fontSize: 12,
+        color: "#ff6b6b",
+        flex: 1,
+        lineHeight: 18,
     },
     textArea: {
         borderWidth: 1,
         borderColor: "#E0E0E0",
         borderRadius: 12,
-        padding: 12,
-        minHeight: 80,
+        padding: 16,
+        minHeight: 100,
         textAlignVertical: "top",
         fontFamily: "Poppins_400Regular",
+        fontSize: 14,
+        backgroundColor: "#fff",
+        marginBottom: 12,
     },
     imageUpload: {
         alignItems: "center",
-        padding: 15,
-        borderWidth: 1,
-        borderColor: "#E0E0E0",
+        justifyContent: "center",
+        padding: 20,
+        borderWidth: 2,
+        borderStyle: "dashed",
+        borderColor: "#1e6355",
         borderRadius: 12,
-        marginBottom: 10,
+        marginBottom: 16,
+        backgroundColor: "#f0fafa",
     },
     uploadText: {
-        fontSize: 12,
+        fontSize: 13,
         textAlign: "center",
-        marginTop: 6,
-        color: "#888",
+        marginTop: 8,
+        color: "#666",
         fontFamily: "Poppins_400Regular",
     },
     imageRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        marginVertical: 10,
+        marginVertical: 12,
+        gap: 10,
+    },
+    imagePreviewContainer: {
+        position: "relative",
     },
     uploadedImage: {
-        width: 70,
-        height: 70,
-        borderRadius: 8,
-        marginRight: 10,
+        width: 80,
+        height: 80,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "#E0E0E0",
+    },
+    removeImageButton: {
+        position: "absolute",
+        top: -8,
+        right: -8,
+        backgroundColor: "#fff",
+        borderRadius: 12,
+        elevation: 2,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+    },
+    imageCountText: {
+        fontFamily: "Poppins_400Regular",
+        fontSize: 12,
+        color: "#666",
+        marginTop: -4,
+        marginBottom: 8,
+        textAlign: "center",
     },
     fixedButtonContainer: {
         position: "absolute",
@@ -586,12 +753,24 @@ const styles = StyleSheet.create({
         right: 0,
         padding: 20,
         backgroundColor: "#fff",
+        borderTopWidth: 1,
+        borderTopColor: "#E0E0E0",
+        elevation: 8,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
     },
     submitBtn: {
         backgroundColor: "#1e6355",
-        paddingVertical: 14,
+        paddingVertical: 16,
         borderRadius: 30,
         alignItems: "center",
+        elevation: 3,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
     },
     submitText: {
         color: "#fff",

@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    BackHandler,
     Image,
     Modal,
     Platform,
@@ -19,10 +20,11 @@ import {
     View
 } from "react-native";
 import DateTimePickerModal from "react-native-modal-datetime-picker";
+import LocationMapPicker from "../../../src/components/maps/LocationMapPicker";
 
 const BACKEND_URL = API_CONFIG.BASE_URL;
 
-// Philippines location data
+// Philippines location data (NCR only)
 const philippinesData = require("../../assets/data/philippines.json");
 
 interface UserData {
@@ -32,7 +34,7 @@ interface UserData {
     email: string;
     phone_number: string;
     location: string | null;
-    exact_location?: string | null;
+    provider_exact_location?: string | null;
     birthday?: string | null;
     profile_photo?: string | null;
     verification_status?: string;
@@ -70,13 +72,15 @@ export default function EditProfileScreen() {
     const [secondOtp, setSecondOtp] = useState("");
     const [newEmailForVerification, setNewEmailForVerification] = useState("");
 
-    // Location cascading states
-    const [selectedProvince, setSelectedProvince] = useState("");
-    const [selectedMunicipality, setSelectedMunicipality] = useState("");
+    // Location cascading states (using NCR districts like signup)
+    const [selectedDistrict, setSelectedDistrict] = useState("");
+    const [selectedCity, setSelectedCity] = useState("");
     const [selectedBarangay, setSelectedBarangay] = useState("");
-    const [showProvinceModal, setShowProvinceModal] = useState(false);
-    const [showMunicipalityModal, setShowMunicipalityModal] = useState(false);
+    const [showDistrictModal, setShowDistrictModal] = useState(false);
+    const [showCityModal, setShowCityModal] = useState(false);
     const [showBarangayModal, setShowBarangayModal] = useState(false);
+    const [isGeocoding, setIsGeocoding] = useState(false);
+    const [manualLocationUpdate, setManualLocationUpdate] = useState(false);
 
     // Date picker
     const [isDatePickerVisible, setDatePickerVisible] = useState(false);
@@ -85,6 +89,20 @@ export default function EditProfileScreen() {
     useFocusEffect(
         useCallback(() => {
             loadUserProfile();
+        }, [])
+    );
+
+    // Override Android back button behavior
+    useFocusEffect(
+        useCallback(() => {
+            const onBackPress = () => {
+                router.replace('/provider/onboarding/providerprofile');
+                return true; // Prevent default back behavior
+            };
+
+            const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+            return () => subscription.remove();
         }, [])
     );
 
@@ -155,12 +173,12 @@ export default function EditProfileScreen() {
     };
 
     const parseLocationString = (locationStr: string) => {
-        // Parse "Barangay, Municipality, Province" format
+        // Parse "Barangay, City, District" format
         const parts = locationStr.split(",").map((p) => p.trim());
         if (parts.length >= 3) {
             setSelectedBarangay(parts[0]);
-            setSelectedMunicipality(parts[1]);
-            setSelectedProvince(parts[2]);
+            setSelectedCity(parts[1]);
+            setSelectedDistrict(parts[2]);
         }
     };
 
@@ -175,9 +193,9 @@ export default function EditProfileScreen() {
 
         try {
             const token = await AsyncStorage.getItem("providerToken");
-            console.log("Requesting OTP from:", `${BACKEND_URL}/provider/profile/request-otp`);
+            console.log("Requesting OTP from:", `${BACKEND_URL}/api/serviceProvider/profile/request-otp`);
             
-            const response = await fetch(`${BACKEND_URL}/provider/profile/request-otp`, {
+            const response = await fetch(`${BACKEND_URL}/api/serviceProvider/profile/request-otp`, {
                 method: "POST",
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -189,13 +207,13 @@ export default function EditProfileScreen() {
             const result = await response.json();
             console.log("OTP request result:", result);
 
-            if (response.ok) {
+            if (response.ok && result.success) {
                 setOtpRequested(true);
-                setMaskedEmail(result.data?.maskedEmail || "");
+                setMaskedEmail(result.email || "your email");
                 setOtpTimer(600); // 10 minutes = 600 seconds
                 Alert.alert(
                     "Verification Code Sent",
-                    `A 6-digit code has been sent to ${result.data?.maskedEmail || "your email"}`
+                    `A 6-digit code has been sent to ${result.email || "your email"}. It will expire in 10 minutes.`
                 );
             } else {
                 // Show detailed error for debugging
@@ -203,14 +221,14 @@ export default function EditProfileScreen() {
                 console.error("OTP request failed:", errorMsg, result);
                 Alert.alert(
                     "Error", 
-                    `${errorMsg}\n\nNote: This feature requires backend implementation. See PROVIDER_EDIT_PROFILE_BACKEND_GUIDE.md for details.`
+                    errorMsg
                 );
             }
         } catch (error) {
             console.error("Error requesting OTP:", error);
             Alert.alert(
                 "Network Error", 
-                `Failed to connect to server.\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nNote: The backend endpoint may not be implemented yet.`
+                `Failed to connect to server.\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}`
             );
         } finally {
             setRequestingOtp(false);
@@ -278,27 +296,63 @@ export default function EditProfileScreen() {
         }
 
         setSaving(true);
+        setShowOtpModal(false);
 
         try {
             const token = await AsyncStorage.getItem("providerToken");
+            if (!token) {
+                Alert.alert("Error", "Please login first");
+                setSaving(false);
+                return;
+            }
 
-            // Prepare update data
+            // Prepare update data according to backend API
             const updateData: any = {
-                phone_number: phone,
-                provider_location: homeAddress,
+                otp: otp.trim(),
             };
 
-            // Add coordinates if available
-            if (locationCoordinates) {
-                updateData.exact_location = `${locationCoordinates.lat},${locationCoordinates.lng}`;
+            // Normalize phone numbers for comparison (remove all non-digit characters)
+            const normalizePhone = (phoneStr: string) => phoneStr.replace(/\D/g, '');
+            const currentPhone = normalizePhone(phone);
+            const originalPhone = userData?.phone_number ? normalizePhone(userData.phone_number) : '';
+
+            // Add phone if changed
+            if (currentPhone && currentPhone !== originalPhone) {
+                updateData.provider_phone_number = phone.startsWith('+') ? phone : `+63${phone}`;
             }
 
             // Add email if changed
-            if (email !== originalEmail) {
+            if (email && email !== originalEmail) {
                 updateData.provider_email = email;
             }
 
-            const response = await fetch(`${BACKEND_URL}/provider/profile?otp=${otp}`, {
+            // Add location if changed
+            if (homeAddress && homeAddress !== userData?.location) {
+                updateData.provider_location = homeAddress;
+            }
+
+            // Add coordinates if changed
+            const originalCoords = userData?.provider_exact_location || '';
+            const newCoords = locationCoordinates ? `${locationCoordinates.lat},${locationCoordinates.lng}` : '';
+            if (newCoords && newCoords !== originalCoords) {
+                updateData.provider_exact_location = newCoords;
+            }
+
+            // Ensure at least one field is being updated besides OTP
+            const hasChanges = updateData.provider_phone_number || 
+                              updateData.provider_email || 
+                              updateData.provider_location || 
+                              updateData.provider_exact_location;
+
+            if (!hasChanges) {
+                Alert.alert("No Changes", "Please make at least one change before saving.");
+                setSaving(false);
+                return;
+            }
+
+            console.log("Updating profile with data:", updateData);
+
+            const response = await fetch(`${BACKEND_URL}/api/serviceProvider/profile`, {
                 method: "PUT",
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -308,39 +362,49 @@ export default function EditProfileScreen() {
             });
 
             const result = await response.json();
+            console.log("Profile update result:", result);
 
-            if (response.ok) {
-                // If email was changed, verify new email
-                if (email !== originalEmail) {
-                    setNewEmailForVerification(email);
-                    setShowOtpModal(false);
-                    Alert.alert(
-                        "Email Verification Required",
-                        `A verification code has been sent to your new email: ${email}. Please enter it to complete the change.`,
-                        [{ text: "OK", onPress: () => setShowSecondOtpModal(true) }]
-                    );
-                } else {
-                    Alert.alert("Success", "Profile updated successfully!", [
+            if (result.success || response.ok) {
+                Alert.alert(
+                    "Success",
+                    "Profile updated successfully!",
+                    [
                         {
                             text: "OK",
                             onPress: () => {
-                                setShowOtpModal(false);
+                                setOtp("");
+                                setOtpRequested(false);
+                                setOtpTimer(0);
                                 loadUserProfile(); // Reload profile
                                 router.back();
                             },
                         },
-                    ]);
-                }
+                    ]
+                );
             } else {
                 Alert.alert("Error", result.message || "Failed to update profile");
+                setShowOtpModal(true); // Show modal again for retry
             }
         } catch (error) {
             console.error("Error updating profile:", error);
             Alert.alert("Error", "Network error during update");
+            setShowOtpModal(true); // Show modal again for retry
         } finally {
             setSaving(false);
         }
     };
+
+    // Note: Two-step email verification is not currently supported by the backend
+    // The following functions are kept for future implementation if needed
+    /*
+    const handleEmailChangeFlow = async (otpCode: string) => {
+        // Reserved for future two-step email change implementation
+    };
+
+    const verifySecondEmailOtp = async () => {
+        // Reserved for future two-step email change implementation
+    };
+    */
 
     const handleVerificationResubmission = async () => {
         setSaving(true);
@@ -361,7 +425,7 @@ export default function EditProfileScreen() {
             formData.append("provider_location", homeAddress);
 
             if (locationCoordinates) {
-                formData.append("exact_location", `${locationCoordinates.lat},${locationCoordinates.lng}`);
+                formData.append("provider_exact_location", `${locationCoordinates.lat},${locationCoordinates.lng}`);
             }
 
             // Profile photo (if new image selected)
@@ -430,50 +494,144 @@ export default function EditProfileScreen() {
         }
     };
 
-    const getProvinces = () => {
-        return Object.keys(philippinesData);
+    // Add district map for display names
+    const districtMap: { [key: string]: string } = {
+        "NATIONAL CAPITAL REGION - MANILA": "NCR District - Manila",
+        "NATIONAL CAPITAL REGION - QUEZON CITY": "NCR District - Quezon City",
+        "NATIONAL CAPITAL REGION - CALOOCAN": "NCR District - Caloocan",
+        "NATIONAL CAPITAL REGION - LAS PIÑAS": "NCR District - Las Piñas",
+        "NATIONAL CAPITAL REGION - MAKATI": "NCR District - Makati",
+        "NATIONAL CAPITAL REGION - MALABON": "NCR District - Malabon",
+        "NATIONAL CAPITAL REGION - MANDALUYONG": "NCR District - Mandaluyong",
+        "NATIONAL CAPITAL REGION - MARIKINA": "NCR District - Marikina",
+        "NATIONAL CAPITAL REGION - MUNTINLUPA": "NCR District - Muntinlupa",
+        "NATIONAL CAPITAL REGION - NAVOTAS": "NCR District - Navotas",
+        "NATIONAL CAPITAL REGION - PARAÑAQUE": "NCR District - Parañaque",
+        "NATIONAL CAPITAL REGION - PASAY": "NCR District - Pasay",
+        "NATIONAL CAPITAL REGION - PASIG": "NCR District - Pasig",
+        "NATIONAL CAPITAL REGION - PATEROS": "NCR District - Pateros",
+        "NATIONAL CAPITAL REGION - SAN JUAN": "NCR District - San Juan",
+        "NATIONAL CAPITAL REGION - TAGUIG": "NCR District - Taguig",
+        "NATIONAL CAPITAL REGION - VALENZUELA": "NCR District - Valenzuela",
     };
 
-    const getMunicipalities = () => {
-        if (!selectedProvince || !philippinesData[selectedProvince]) return [];
-        return Object.keys(philippinesData[selectedProvince].municipality_list);
+    const getDistricts = () => {
+        if (philippinesData && philippinesData["NCR"]) {
+            return Object.keys(philippinesData["NCR"].province_list);
+        }
+        return [];
+    };
+
+    const getCities = () => {
+        if (!selectedDistrict || !philippinesData["NCR"]?.province_list[selectedDistrict]) return [];
+        return Object.keys(philippinesData["NCR"].province_list[selectedDistrict].municipality_list);
     };
 
     const getBarangays = () => {
         if (
-            !selectedProvince ||
-            !selectedMunicipality ||
-            !philippinesData[selectedProvince]?.municipality_list[selectedMunicipality]
+            !selectedDistrict ||
+            !selectedCity ||
+            !philippinesData["NCR"]?.province_list[selectedDistrict]?.municipality_list[selectedCity]
         )
             return [];
-        return philippinesData[selectedProvince].municipality_list[selectedMunicipality].barangay_list;
+        return philippinesData["NCR"].province_list[selectedDistrict].municipality_list[selectedCity].barangay_list;
     };
 
-    const handleProvinceSelect = (province: string) => {
-        setSelectedProvince(province);
-        setSelectedMunicipality("");
+    const handleDistrictSelect = (district: string) => {
+        setSelectedDistrict(district);
+        setSelectedCity("");
         setSelectedBarangay("");
-        setShowProvinceModal(false);
-        updateHomeAddress(selectedBarangay, "", province);
+        setShowDistrictModal(false);
+        setManualLocationUpdate(false); // Reset when changing location selection
+        updateHomeAddress(selectedBarangay, "", district);
     };
 
-    const handleMunicipalitySelect = (municipality: string) => {
-        setSelectedMunicipality(municipality);
+    const handleCitySelect = (city: string) => {
+        setSelectedCity(city);
         setSelectedBarangay("");
-        setShowMunicipalityModal(false);
-        updateHomeAddress(selectedBarangay, municipality, selectedProvince);
+        setShowCityModal(false);
+        setManualLocationUpdate(false); // Reset when changing location selection
+        updateHomeAddress(selectedBarangay, city, selectedDistrict);
     };
 
     const handleBarangaySelect = (barangay: string) => {
         setSelectedBarangay(barangay);
         setShowBarangayModal(false);
-        updateHomeAddress(barangay, selectedMunicipality, selectedProvince);
+        setManualLocationUpdate(false); // Reset when changing location selection
+        updateHomeAddress(barangay, selectedCity, selectedDistrict);
     };
 
     const updateHomeAddress = (barangay: string, municipality: string, province: string) => {
         const parts = [barangay, municipality, province].filter(Boolean);
         setHomeAddress(parts.join(", "));
     };
+
+    // Geocoding function
+    const geocodeLocation = async () => {
+        if (!selectedDistrict || !selectedCity || !selectedBarangay) {
+            return;
+        }
+
+        setIsGeocoding(true);
+        try {
+            const addressQuery = `${selectedBarangay}, ${selectedCity}, Philippines`;
+            const encodedAddress = encodeURIComponent(addressQuery);
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=1`,
+                {
+                    headers: {
+                        'User-Agent': 'FixmoServiceProviderApp/1.0',
+                    },
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error('Geocoding failed');
+            }
+
+            const data = await response.json();
+
+            if (data && data.length > 0) {
+                const {lat, lon} = data[0];
+                const coords = {
+                    lat: parseFloat(lat),
+                    lng: parseFloat(lon)
+                };
+                setLocationCoordinates(coords);
+            } else {
+                // Fallback to city-level if barangay not found
+                const cityQuery = `${selectedCity}, Philippines`;
+                const cityResponse = await fetch(
+                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cityQuery)}&limit=1`,
+                    {
+                        headers: {
+                            'User-Agent': 'FixmoServiceProviderApp/1.0',
+                        },
+                    }
+                );
+                const cityData = await cityResponse.json();
+                if (cityData && cityData.length > 0) {
+                    const {lat, lon} = cityData[0];
+                    setLocationCoordinates({
+                        lat: parseFloat(lat),
+                        lng: parseFloat(lon)
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Geocoding error:', error);
+        } finally {
+            setIsGeocoding(false);
+        }
+    };
+
+    // Auto-trigger geocoding when all location fields are selected
+    useEffect(() => {
+        // Only geocode if location was not manually updated
+        if (selectedDistrict && selectedCity && selectedBarangay && !manualLocationUpdate) {
+            geocodeLocation();
+        }
+    }, [selectedDistrict, selectedCity, selectedBarangay]);
 
     if (loading) {
         return (
@@ -552,10 +710,10 @@ export default function EditProfileScreen() {
             <TouchableOpacity 
                 style={[
                     styles.avatarContainer,
-                    userData?.verification_status === "approved" && !otpRequested && styles.avatarDisabled
+                    styles.avatarDisabled // Always disabled
                 ]} 
                 onPress={pickImage}
-                disabled={userData?.verification_status === "approved" && !otpRequested}
+                disabled={true} // Always disabled
             >
                 {profileUri ? (
                     <Image source={{ uri: profileUri }} style={styles.avatarImage} />
@@ -563,9 +721,7 @@ export default function EditProfileScreen() {
                     <Ionicons name="person-circle-outline" size={80} color="#ccc" />
                 )}
                 <Text style={styles.changePhoto}>
-                    {userData?.verification_status === "approved" && !otpRequested 
-                        ? "Request code to change photo" 
-                        : "Tap to change photo"}
+                    Profile photo cannot be changed here
                 </Text>
             </TouchableOpacity>
 
@@ -573,31 +729,35 @@ export default function EditProfileScreen() {
             <View style={styles.form}>
                 {/* First Name */}
                 <View style={styles.inputGroup}>
-                    <Text style={styles.label}>First Name *</Text>
+                    <Text style={styles.label}>
+                        First Name <Text style={styles.required}>*</Text>
+                    </Text>
                     <TextInput
                         style={[
                             styles.input,
-                            userData?.verification_status === "approved" && !otpRequested && styles.inputDisabled
+                            styles.inputDisabled // Always disabled
                         ]}
                         value={firstName}
                         onChangeText={setFirstName}
                         placeholder="Enter first name"
-                        editable={userData?.verification_status !== "approved" || otpRequested}
+                        editable={false} // Always disabled
                     />
                 </View>
 
                 {/* Last Name */}
                 <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Last Name *</Text>
+                    <Text style={styles.label}>
+                        Last Name <Text style={styles.required}>*</Text>
+                    </Text>
                     <TextInput
                         style={[
                             styles.input,
-                            userData?.verification_status === "approved" && !otpRequested && styles.inputDisabled
+                            styles.inputDisabled // Always disabled
                         ]}
                         value={lastName}
                         onChangeText={setLastName}
                         placeholder="Enter last name"
-                        editable={userData?.verification_status !== "approved" || otpRequested}
+                        editable={false} // Always disabled
                     />
                 </View>
 
@@ -607,10 +767,10 @@ export default function EditProfileScreen() {
                     <TouchableOpacity
                         style={[
                             styles.dateButton,
-                            userData?.verification_status === "approved" && !otpRequested && styles.inputDisabled
+                            styles.inputDisabled // Always disabled
                         ]}
                         onPress={() => setDatePickerVisible(true)}
-                        disabled={userData?.verification_status === "approved" && !otpRequested}
+                        disabled={true} // Always disabled
                     >
                         <Text style={styles.dateButtonText}>
                             {birthday ? birthday.toLocaleDateString() : "Select birthday"}
@@ -632,7 +792,9 @@ export default function EditProfileScreen() {
 
                 {/* Email - Editable for approved users who requested OTP */}
                 <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Email *</Text>
+                    <Text style={styles.label}>
+                        Email <Text style={styles.required}>*</Text>
+                    </Text>
                     <TextInput
                         style={[
                             styles.input,
@@ -649,7 +811,9 @@ export default function EditProfileScreen() {
 
                 {/* Phone */}
                 <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Phone Number *</Text>
+                    <Text style={styles.label}>
+                        Phone Number <Text style={styles.required}>*</Text>
+                    </Text>
                     <View style={[
                         styles.phoneInputContainer,
                         userData?.verification_status === "approved" && !otpRequested && styles.inputDisabled
@@ -673,46 +837,52 @@ export default function EditProfileScreen() {
 
                 {/* Location Cascading */}
                 <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Province *</Text>
+                    <Text style={styles.label}>
+                        District <Text style={styles.required}>*</Text>
+                    </Text>
                     <TouchableOpacity
                         style={[
                             styles.selectButton,
                             userData?.verification_status === "approved" && !otpRequested && styles.inputDisabled
                         ]}
-                        onPress={() => setShowProvinceModal(true)}
+                        onPress={() => setShowDistrictModal(true)}
                         disabled={userData?.verification_status === "approved" && !otpRequested}
                     >
-                        <Text style={selectedProvince ? styles.selectButtonText : styles.selectPlaceholder}>
-                            {selectedProvince || "Select Province"}
+                        <Text style={selectedDistrict ? styles.selectButtonText : styles.selectPlaceholder}>
+                            {selectedDistrict ? districtMap[selectedDistrict] || selectedDistrict : "Select District"}
                         </Text>
                         <Ionicons name="chevron-down" size={20} color="#666" />
                     </TouchableOpacity>
                 </View>
 
-                {selectedProvince && (
+                {selectedDistrict && (
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Municipality/City *</Text>
+                        <Text style={styles.label}>
+                            City <Text style={styles.required}>*</Text>
+                        </Text>
                         <TouchableOpacity
                             style={[
                                 styles.selectButton,
                                 userData?.verification_status === "approved" && !otpRequested && styles.inputDisabled
                             ]}
-                            onPress={() => setShowMunicipalityModal(true)}
+                            onPress={() => setShowCityModal(true)}
                             disabled={userData?.verification_status === "approved" && !otpRequested}
                         >
                             <Text
-                                style={selectedMunicipality ? styles.selectButtonText : styles.selectPlaceholder}
+                                style={selectedCity ? styles.selectButtonText : styles.selectPlaceholder}
                             >
-                                {selectedMunicipality || "Select Municipality/City"}
+                                {selectedCity || "Select City"}
                             </Text>
                             <Ionicons name="chevron-down" size={20} color="#666" />
                         </TouchableOpacity>
                     </View>
                 )}
 
-                {selectedMunicipality && (
+                {selectedCity && (
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Barangay *</Text>
+                        <Text style={styles.label}>
+                            Barangay <Text style={styles.required}>*</Text>
+                        </Text>
                         <TouchableOpacity
                             style={[
                                 styles.selectButton,
@@ -736,20 +906,70 @@ export default function EditProfileScreen() {
                         <Text style={styles.addressDisplay}>{homeAddress}</Text>
                     </View>
                 )}
+
+                {/* Geocoding and Map Picker */}
+                {isGeocoding && (
+                    <View style={styles.geocodingContainer}>
+                        <ActivityIndicator size="small" color="#008080" />
+                        <Text style={styles.geocodingText}>Finding location coordinates...</Text>
+                    </View>
+                )}
+
+                {/* Map Section - Always show if we have location data */}
+                {selectedDistrict && selectedCity && selectedBarangay && locationCoordinates && (
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Pin Your Exact Location on Map</Text>
+                        <Text style={styles.coordinatesText}>
+                            📍 {locationCoordinates.lat.toFixed(6)}, {locationCoordinates.lng.toFixed(6)}
+                        </Text>
+                        <Text style={styles.helperText}>
+                            💡 Drag the pin on the map to set your exact location (within 1km of your barangay)
+                        </Text>
+                        <LocationMapPicker
+                            district={selectedDistrict}
+                            city={selectedCity}
+                            barangay={selectedBarangay}
+                            initialCoordinates={{
+                                latitude: locationCoordinates.lat,
+                                longitude: locationCoordinates.lng
+                            }}
+                            onLocationUpdate={(coords) => {
+                                setManualLocationUpdate(true);
+                                setLocationCoordinates({
+                                    lat: coords.latitude,
+                                    lng: coords.longitude
+                                });
+                            }}
+                            disabled={userData?.verification_status === "approved" && !otpRequested}
+                        />
+                    </View>
+                )}
+
+                {/* Show message if location not set */}
+                {selectedDistrict && selectedCity && selectedBarangay && !locationCoordinates && !isGeocoding && (
+                    <View style={styles.warningBox}>
+                        <Ionicons name="location-outline" size={24} color="#FF9800" />
+                        <Text style={styles.warningText}>
+                            Waiting for location coordinates. The map will appear once your location is geocoded.
+                        </Text>
+                    </View>
+                )}
             </View>
 
-            {/* Save Button */}
-            <TouchableOpacity
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                onPress={handleSave}
-                disabled={saving}
-            >
-                {saving ? (
-                    <ActivityIndicator color="#fff" />
-                ) : (
-                    <Text style={styles.saveText}>Save Changes</Text>
-                )}
-            </TouchableOpacity>
+            {/* Save Button - Only show if OTP requested (approved users) or not approved */}
+            {(userData?.verification_status !== "approved" || otpRequested) && (
+                <TouchableOpacity
+                    style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                    onPress={handleSave}
+                    disabled={saving}
+                >
+                    {saving ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text style={styles.saveText}>Save Changes</Text>
+                    )}
+                </TouchableOpacity>
+            )}
 
             {/* OTP Verification Modal */}
             <Modal
@@ -798,29 +1018,34 @@ export default function EditProfileScreen() {
                 </View>
             </Modal>
 
-            {/* Province Modal */}
+            {/* Note: Second OTP Modal removed - backend currently uses single-step verification */}
+            {/* Two-step email verification can be added when backend supports it */}
+
+            {/* District Modal */}
             <Modal
-                visible={showProvinceModal}
+                visible={showDistrictModal}
                 animationType="slide"
                 transparent={true}
-                onRequestClose={() => setShowProvinceModal(false)}
+                onRequestClose={() => setShowDistrictModal(false)}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.locationModalContent}>
                         <View style={styles.locationModalHeader}>
-                            <Text style={styles.locationModalTitle}>Select Province</Text>
-                            <TouchableOpacity onPress={() => setShowProvinceModal(false)}>
+                            <Text style={styles.locationModalTitle}>Select District</Text>
+                            <TouchableOpacity onPress={() => setShowDistrictModal(false)}>
                                 <Ionicons name="close" size={28} color="#333" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView>
-                            {getProvinces().map((province) => (
+                            {getDistricts().map((district) => (
                                 <TouchableOpacity
-                                    key={province}
+                                    key={district}
                                     style={styles.locationItem}
-                                    onPress={() => handleProvinceSelect(province)}
+                                    onPress={() => handleDistrictSelect(district)}
                                 >
-                                    <Text style={styles.locationItemText}>{province}</Text>
+                                    <Text style={styles.locationItemText}>
+                                        {districtMap[district] || district}
+                                    </Text>
                                 </TouchableOpacity>
                             ))}
                         </ScrollView>
@@ -828,29 +1053,29 @@ export default function EditProfileScreen() {
                 </View>
             </Modal>
 
-            {/* Municipality Modal */}
+            {/* City Modal */}
             <Modal
-                visible={showMunicipalityModal}
+                visible={showCityModal}
                 animationType="slide"
                 transparent={true}
-                onRequestClose={() => setShowMunicipalityModal(false)}
+                onRequestClose={() => setShowCityModal(false)}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.locationModalContent}>
                         <View style={styles.locationModalHeader}>
-                            <Text style={styles.locationModalTitle}>Select Municipality/City</Text>
-                            <TouchableOpacity onPress={() => setShowMunicipalityModal(false)}>
+                            <Text style={styles.locationModalTitle}>Select City</Text>
+                            <TouchableOpacity onPress={() => setShowCityModal(false)}>
                                 <Ionicons name="close" size={28} color="#333" />
                             </TouchableOpacity>
                         </View>
                         <ScrollView>
-                            {getMunicipalities().map((municipality) => (
+                            {getCities().map((city) => (
                                 <TouchableOpacity
-                                    key={municipality}
+                                    key={city}
                                     style={styles.locationItem}
-                                    onPress={() => handleMunicipalitySelect(municipality)}
+                                    onPress={() => handleCitySelect(city)}
                                 >
-                                    <Text style={styles.locationItemText}>{municipality}</Text>
+                                    <Text style={styles.locationItemText}>{city}</Text>
                                 </TouchableOpacity>
                             ))}
                         </ScrollView>
@@ -1027,6 +1252,10 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         color: "#333",
     },
+    required: {
+        color: "#FF0000",
+        fontWeight: "bold",
+    },
     input: {
         backgroundColor: "#f9f9f9",
         padding: 14,
@@ -1167,6 +1396,33 @@ const styles = StyleSheet.create({
         color: "#fff",
         fontSize: 16,
         fontWeight: "600",
+    },
+    geocodingContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        backgroundColor: "#E0F2F1",
+        borderRadius: 8,
+        marginVertical: 12,
+    },
+    geocodingText: {
+        marginLeft: 10,
+        fontSize: 14,
+        color: "#008080",
+        fontWeight: "500",
+    },
+    coordinatesText: {
+        fontSize: 15,
+        color: "#008080",
+        backgroundColor: "#E0F2F1",
+        padding: 14,
+        borderRadius: 12,
+        fontWeight: "600",
+        marginBottom: 8,
+        textAlign: "center",
+        borderWidth: 1,
+        borderColor: "#B2DFDB",
     },
     locationModalContent: {
         backgroundColor: "#fff",
