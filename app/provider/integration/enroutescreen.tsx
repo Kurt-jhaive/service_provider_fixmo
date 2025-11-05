@@ -644,7 +644,7 @@ export default function EnRouteScreen() {
 
                     {/* Customer No Show Button - Shows after 1 hour (60 minutes) */}
                     {(() => {
-                        const shouldShow = elapsedMinutes >= 1;
+                        const shouldShow = elapsedMinutes >= 60;
                         console.log('🔍 No-Show Button Check - elapsedMinutes:', elapsedMinutes, 'shouldShow:', shouldShow);
                         return shouldShow ? (
                             <TouchableOpacity
