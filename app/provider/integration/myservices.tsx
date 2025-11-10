@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -30,7 +31,9 @@ import {
     toggleServiceAvailability,
     updateService
 } from "../../../src/api/services.api";
+import { getCertificates } from "../../../src/api/certificates.api";
 import type { Service } from "../../../src/types/service";
+import type { Certificate } from "../../../src/types/certificate";
 import certificateServicesJson from "../../assets/data/certificateservices.json";
 
 type CertificateService = {
@@ -55,14 +58,22 @@ export default function MyServices() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [services, setServices] = useState<Service[]>([]);
+    const [certificates, setCertificates] = useState<Certificate[]>([]);
+    const [expiredCertificateIds, setExpiredCertificateIds] = useState<number[]>([]);
     
     // Edit modal state
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [selectedService, setSelectedService] = useState<Service | null>(null);
     const [editDescription, setEditDescription] = useState("");
     const [editPrice, setEditPrice] = useState("");
+    const [editWarrantyDays, setEditWarrantyDays] = useState("");
     const [priceRange, setPriceRange] = useState<{ min: number; max: number } | null>(null);
     const [updating, setUpdating] = useState(false);
+    
+    // Photo management state
+    const [existingPhotos, setExistingPhotos] = useState<{id: number; imageUrl: string}[]>([]);
+    const [photosToRemove, setPhotosToRemove] = useState<number[]>([]);
+    const [newPhotos, setNewPhotos] = useState<{uri: string; name: string; type: string}[]>([]);
 
     let [fontsLoaded] = useFonts({
         Poppins_400Regular,
@@ -81,19 +92,52 @@ export default function MyServices() {
                 return;
             }
 
+            // Fetch services
             const data = await getProviderServices(token);
             
-            // Ensure servicelisting_isActive is properly converted to boolean
-            const normalizedData = data.map(service => ({
-                ...service,
-                servicelisting_isActive: Boolean(service.servicelisting_isActive)
-            }));
+            // Fetch certificates to check for expired ones
+            const certsData = await getCertificates(token);
+            setCertificates(certsData);
+            
+            // Check for expired certificates
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const expired = certsData
+                .filter(cert => {
+                    if (!cert.expiry_date) return false;
+                    const expiryDate = new Date(cert.expiry_date);
+                    expiryDate.setHours(0, 0, 0, 0);
+                    return expiryDate < today;
+                })
+                .map(cert => cert.certificate_id);
+            
+            setExpiredCertificateIds(expired);
+            console.log('Expired certificate IDs:', expired);
+            
+            // Normalize services and auto-deactivate services with expired certificates
+            const normalizedData = data.map(service => {
+                const isExpired = service.certificate_id && expired.includes(service.certificate_id);
+                
+                // If certificate is expired and service is active, force it to inactive
+                const shouldBeActive = isExpired ? false : Boolean(service.servicelisting_isActive);
+                
+                if (isExpired && service.servicelisting_isActive) {
+                    console.log(`⚠️ Service ${service.service_id} (${service.service_title}) has expired certificate ${service.certificate_id} - setting to inactive`);
+                }
+                
+                return {
+                    ...service,
+                    servicelisting_isActive: shouldBeActive
+                };
+            });
             
             console.log('Fetched services:', normalizedData.map(s => ({
                 id: s.service_id,
                 title: s.service_title,
                 isActive: s.servicelisting_isActive,
-                isActiveType: typeof s.servicelisting_isActive
+                isActiveType: typeof s.servicelisting_isActive,
+                certificateId: s.certificate_id
             })));
             
             setServices(normalizedData);
@@ -113,6 +157,26 @@ export default function MyServices() {
 
     const handleToggleActive = async (service: Service) => {
         try {
+            // Check if this service's certificate is expired
+            if (expiredCertificateIds.includes(service.certificate_id)) {
+                const expiredCert = certificates.find(c => c.certificate_id === service.certificate_id);
+                Alert.alert(
+                    "Certificate Expired",
+                    `Cannot activate this service because your certificate "${expiredCert?.certificate_name || 'certificate'}" has expired${expiredCert?.expiry_date ? ` on ${new Date(expiredCert.expiry_date).toLocaleDateString()}` : ''}.\n\nPlease resubmit a valid certificate to reactivate this service.`,
+                    [
+                        {
+                            text: "Resubmit Certificate",
+                            onPress: () => router.push("/provider/integration/addnewcertificate")
+                        },
+                        {
+                            text: "Cancel",
+                            style: "cancel"
+                        }
+                    ]
+                );
+                return;
+            }
+
             const token = await AsyncStorage.getItem("providerToken");
             if (!token) {
                 Alert.alert("Error", "Authentication required.");
@@ -149,6 +213,16 @@ export default function MyServices() {
         setSelectedService(service);
         setEditDescription(service.service_description);
         setEditPrice(service.service_startingprice.toString());
+        setEditWarrantyDays(service.warranty_days?.toString() || "");
+        
+        // Initialize photos
+        const photos = service.service_photos?.map((photo: any, index: number) => ({
+            id: photo.id || index,
+            imageUrl: typeof photo === 'string' ? photo : photo.imageUrl
+        })) || [];
+        setExistingPhotos(photos);
+        setPhotosToRemove([]);
+        setNewPhotos([]);
 
         // Find price range from certificateservices.json
         let foundRange: { min: number; max: number } | null = null;
@@ -167,6 +241,70 @@ export default function MyServices() {
         setEditModalVisible(true);
     };
 
+    const handlePickPhotos = async () => {
+        const remainingSlots = 5 - (existingPhotos.length - photosToRemove.length + newPhotos.length);
+        
+        if (remainingSlots <= 0) {
+            Alert.alert("Photo Limit Reached", "You can have maximum 5 photos per service.");
+            return;
+        }
+
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsMultipleSelection: true,
+                quality: 0.8,
+                aspect: [16, 9],
+            });
+
+            if (!result.canceled && result.assets) {
+                const photosToAdd = result.assets.slice(0, remainingSlots);
+                const formattedPhotos = photosToAdd.map(asset => ({
+                    uri: asset.uri,
+                    name: asset.fileName || `photo_${Date.now()}.jpg`,
+                    type: asset.type === 'image' ? 'image/jpeg' : 'image/jpeg',
+                }));
+                
+                setNewPhotos([...newPhotos, ...formattedPhotos]);
+                
+                if (result.assets.length > remainingSlots) {
+                    Alert.alert(
+                        "Photo Limit", 
+                        `Only ${remainingSlots} photo(s) can be added. Maximum 5 photos per service.`
+                    );
+                }
+            }
+        } catch (error) {
+            console.error('Image picker error:', error);
+            Alert.alert('Error', 'Failed to pick photos. Please try again.');
+        }
+    };
+
+    const handleRemoveExistingPhoto = (photoId: number) => {
+        Alert.alert(
+            "Remove Photo",
+            "Are you sure you want to remove this photo?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Remove",
+                    style: "destructive",
+                    onPress: () => {
+                        setPhotosToRemove([...photosToRemove, photoId]);
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleUndoRemovePhoto = (photoId: number) => {
+        setPhotosToRemove(photosToRemove.filter(id => id !== photoId));
+    };
+
+    const handleRemoveNewPhoto = (index: number) => {
+        setNewPhotos(newPhotos.filter((_, i) => i !== index));
+    };
+
     const handleUpdateService = async () => {
         if (!selectedService) return;
 
@@ -178,6 +316,15 @@ export default function MyServices() {
         if (!editPrice || isNaN(parseFloat(editPrice))) {
             Alert.alert("Invalid Input", "Please enter a valid price.");
             return;
+        }
+        
+        // Validate warranty days if provided
+        if (editWarrantyDays && editWarrantyDays.trim() !== "") {
+            const warrantyNum = parseInt(editWarrantyDays);
+            if (isNaN(warrantyNum) || warrantyNum < 7 || warrantyNum > 14) {
+                Alert.alert("Invalid Warranty Days", "Warranty days must be between 7 and 14 days.");
+                return;
+            }
         }
 
         const priceNum = parseFloat(editPrice);
@@ -192,6 +339,21 @@ export default function MyServices() {
                 return;
             }
         }
+        
+        // Validate photo count
+        const finalPhotoCount = existingPhotos.length - photosToRemove.length + newPhotos.length;
+        if (finalPhotoCount > 5) {
+            Alert.alert(
+                "Too Many Photos",
+                `Maximum 5 photos allowed. You currently have ${existingPhotos.length} photo(s), removing ${photosToRemove.length}, and adding ${newPhotos.length}.`
+            );
+            return;
+        }
+        
+        if (finalPhotoCount === 0) {
+            Alert.alert("No Photos", "Service must have at least one photo.");
+            return;
+        }
 
         setUpdating(true);
 
@@ -203,21 +365,30 @@ export default function MyServices() {
                 return;
             }
 
-            const updateData = {
+            const updateData: any = {
                 service_description: editDescription.trim(),
                 service_startingprice: priceNum,
             };
+            
+            // Add warranty days if provided
+            if (editWarrantyDays && editWarrantyDays.trim() !== "") {
+                updateData.warranty_days = parseInt(editWarrantyDays);
+            }
+            
+            // Add photo changes if any
+            if (photosToRemove.length > 0) {
+                updateData.photosToRemove = photosToRemove;
+            }
+            if (newPhotos.length > 0) {
+                updateData.newPhotos = newPhotos;
+            }
 
-            await updateService(selectedService.service_id, updateData, token);
+            const updatedService = await updateService(selectedService.service_id, updateData, token);
 
-            // Update local state
+            // Update local state with the full updated service from backend
             setServices(services.map(s =>
                 s.service_id === selectedService.service_id
-                    ? { 
-                        ...s, 
-                        service_description: editDescription.trim(),
-                        service_startingprice: priceNum
-                    }
+                    ? updatedService
                     : s
             ));
 
@@ -228,6 +399,11 @@ export default function MyServices() {
         } finally {
             setUpdating(false);
         }
+    };
+
+    const getTotalPhotoCount = () => {
+        return existingPhotos.length - photosToRemove.length + newPhotos.length;
+        return existingPhotos.length - photosToRemove.length + newPhotos.length;
     };
 
     if (!fontsLoaded || loading) {
@@ -271,8 +447,33 @@ export default function MyServices() {
                     </View>
                 ) : (
                     <>
-                        {services.map((service) => (
+                        {services.map((service) => {
+                            const isExpired = expiredCertificateIds.includes(service.certificate_id);
+                            const expiredCert = isExpired 
+                                ? certificates.find(c => c.certificate_id === service.certificate_id)
+                                : null;
+                            
+                            return (
                             <View key={service.service_id} style={styles.serviceCard}>
+                                {/* Expired Certificate Banner */}
+                                {isExpired && (
+                                    <View style={styles.expiredBanner}>
+                                        <Ionicons name="alert-circle" size={20} color="#D32F2F" />
+                                        <View style={{flex: 1, marginLeft: 8}}>
+                                            <Text style={styles.expiredBannerTitle}>Certificate Expired</Text>
+                                            <Text style={styles.expiredBannerText}>
+                                                {expiredCert?.certificate_name} expired on {expiredCert?.expiry_date ? new Date(expiredCert.expiry_date).toLocaleDateString() : 'N/A'}
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            onPress={() => router.push("/provider/integration/addnewcertificate")}
+                                            style={styles.expiredBannerButton}
+                                        >
+                                            <Text style={styles.expiredBannerButtonText}>Resubmit</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+
                                 {/* Service Header */}
                                 <View style={styles.serviceHeader}>
                                     <View style={{ flex: 1 }}>
@@ -282,16 +483,25 @@ export default function MyServices() {
                                         <Text style={styles.servicePrice}>
                                             ₱{service.service_startingprice}
                                         </Text>
+                                        {service.warranty_days !== undefined && service.warranty_days > 0 && (
+                                            <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
+                                                <Ionicons name="shield-checkmark" size={14} color="#1e6355" />
+                                                <Text style={{fontSize: 12, color: "#666", marginLeft: 4}}>
+                                                    {service.warranty_days} days warranty
+                                                </Text>
+                                            </View>
+                                        )}
                                     </View>
                                     <View style={styles.switchContainer}>
-                                        <Text style={styles.switchLabel}>
+                                        <Text style={[styles.switchLabel, isExpired && {color: '#D32F2F'}]}>
                                             {service.servicelisting_isActive ? "Active" : "Inactive"}
                                         </Text>
                                         <Switch
                                             value={service.servicelisting_isActive}
                                             onValueChange={() => handleToggleActive(service)}
-                                            trackColor={{ false: "#ccc", true: "#1e6355" }}
-                                            thumbColor="#fff"
+                                            trackColor={{ false: "#ccc", true: isExpired ? "#ccc" : "#1e6355" }}
+                                            thumbColor={isExpired ? "#D32F2F" : "#fff"}
+                                            disabled={isExpired}
                                         />
                                     </View>
                                 </View>
@@ -333,7 +543,8 @@ export default function MyServices() {
                                     <Text style={styles.editButtonText}>Edit Service</Text>
                                 </TouchableOpacity>
                             </View>
-                        ))}
+                            );
+                        })}
                     </>
                 )}
             </ScrollView>
@@ -397,6 +608,100 @@ export default function MyServices() {
                                         value={editPrice}
                                         onChangeText={setEditPrice}
                                     />
+
+                                    {/* Warranty Days */}
+                                    <Text style={styles.label}>Warranty Days (7-14)</Text>
+                                    <TextInput
+                                        style={styles.inputBox}
+                                        keyboardType="numeric"
+                                        placeholder="Enter warranty days (optional)"
+                                        placeholderTextColor="#A0A0A0"
+                                        value={editWarrantyDays}
+                                        onChangeText={(val) => {
+                                            const numericValue = val.replace(/[^0-9]/g, '');
+                                            setEditWarrantyDays(numericValue);
+                                        }}
+                                        maxLength={2}
+                                    />
+
+                                    {/* Photo Management */}
+                                    <Text style={styles.label}>
+                                        Service Photos ({getTotalPhotoCount()} of 5)
+                                    </Text>
+                                    
+                                    {/* Existing Photos */}
+                                    <View style={styles.photoGrid}>
+                                        {existingPhotos.map((photo) => {
+                                            const isMarkedForRemoval = photosToRemove.includes(photo.id);
+                                            return (
+                                                <View key={photo.id} style={styles.photoContainer}>
+                                                    <Image 
+                                                        source={{ uri: photo.imageUrl }} 
+                                                        style={[
+                                                            styles.photoThumbnail,
+                                                            isMarkedForRemoval && styles.photoMarkedForRemoval
+                                                        ]} 
+                                                    />
+                                                    {isMarkedForRemoval ? (
+                                                        <TouchableOpacity
+                                                            style={styles.undoButton}
+                                                            onPress={() => handleUndoRemovePhoto(photo.id)}
+                                                        >
+                                                            <Ionicons name="arrow-undo" size={18} color="#fff" />
+                                                        </TouchableOpacity>
+                                                    ) : (
+                                                        <TouchableOpacity
+                                                            style={styles.removePhotoButton}
+                                                            onPress={() => handleRemoveExistingPhoto(photo.id)}
+                                                        >
+                                                            <Ionicons name="close-circle" size={24} color="#ff6b6b" />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                    {isMarkedForRemoval && (
+                                                        <View style={styles.removedOverlay}>
+                                                            <Text style={styles.removedText}>To be removed</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
+                                            );
+                                        })}
+                                        
+                                        {/* New Photos */}
+                                        {newPhotos.map((photo, index) => (
+                                            <View key={`new-${index}`} style={styles.photoContainer}>
+                                                <Image 
+                                                    source={{ uri: photo.uri }} 
+                                                    style={styles.photoThumbnail} 
+                                                />
+                                                <TouchableOpacity
+                                                    style={styles.removePhotoButton}
+                                                    onPress={() => handleRemoveNewPhoto(index)}
+                                                >
+                                                    <Ionicons name="close-circle" size={24} color="#ff6b6b" />
+                                                </TouchableOpacity>
+                                                <View style={styles.newBadge}>
+                                                    <Text style={styles.newBadgeText}>NEW</Text>
+                                                </View>
+                                            </View>
+                                        ))}
+                                        
+                                        {/* Add Photo Button */}
+                                        {getTotalPhotoCount() < 5 && (
+                                            <TouchableOpacity
+                                                style={styles.addPhotoButton}
+                                                onPress={handlePickPhotos}
+                                            >
+                                                <Ionicons name="add-circle-outline" size={32} color="#1e6355" />
+                                                <Text style={styles.addPhotoText}>Add Photo</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+
+                                    {getTotalPhotoCount() === 0 && (
+                                        <Text style={styles.photoWarning}>
+                                            ⚠️ Service must have at least one photo
+                                        </Text>
+                                    )}
 
                                     {/* Update Button */}
                                     <TouchableOpacity
@@ -628,5 +933,140 @@ const styles = StyleSheet.create({
         color: "#fff",
         fontFamily: "Poppins_600SemiBold",
         fontSize: 16,
+    },
+    expiredBanner: {
+        backgroundColor: "#FFEBEE",
+        padding: 12,
+        borderRadius: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 12,
+        borderLeftWidth: 4,
+        borderLeftColor: "#D32F2F",
+    },
+    expiredBannerTitle: {
+        fontSize: 14,
+        fontFamily: "Poppins_600SemiBold",
+        color: "#D32F2F",
+        marginBottom: 2,
+    },
+    expiredBannerText: {
+        fontSize: 12,
+        fontFamily: "Poppins_400Regular",
+        color: "#C62828",
+    },
+    expiredBannerButton: {
+        backgroundColor: "#D32F2F",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 6,
+    },
+    expiredBannerButtonText: {
+        color: "#fff",
+        fontSize: 12,
+        fontFamily: "Poppins_600SemiBold",
+    },
+    // Photo Management Styles
+    photoGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 12,
+        marginTop: 8,
+        marginBottom: 16,
+    },
+    photoContainer: {
+        width: 100,
+        height: 100,
+        position: "relative",
+    },
+    photoThumbnail: {
+        width: 100,
+        height: 100,
+        borderRadius: 8,
+        borderWidth: 2,
+        borderColor: "#E0E0E0",
+    },
+    photoMarkedForRemoval: {
+        opacity: 0.4,
+    },
+    removePhotoButton: {
+        position: "absolute",
+        top: -8,
+        right: -8,
+        backgroundColor: "#fff",
+        borderRadius: 12,
+        elevation: 2,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+    },
+    undoButton: {
+        position: "absolute",
+        top: -8,
+        right: -8,
+        backgroundColor: "#FF9800",
+        borderRadius: 12,
+        padding: 4,
+        elevation: 2,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+    },
+    removedOverlay: {
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: "rgba(255, 107, 107, 0.9)",
+        padding: 4,
+        borderBottomLeftRadius: 6,
+        borderBottomRightRadius: 6,
+    },
+    removedText: {
+        color: "#fff",
+        fontSize: 10,
+        fontFamily: "Poppins_600SemiBold",
+        textAlign: "center",
+    },
+    newBadge: {
+        position: "absolute",
+        top: 4,
+        left: 4,
+        backgroundColor: "#4CAF50",
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    newBadgeText: {
+        color: "#fff",
+        fontSize: 10,
+        fontFamily: "Poppins_600SemiBold",
+    },
+    addPhotoButton: {
+        width: 100,
+        height: 100,
+        borderRadius: 8,
+        borderWidth: 2,
+        borderColor: "#1e6355",
+        borderStyle: "dashed",
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: "#f0fafa",
+    },
+    addPhotoText: {
+        fontSize: 12,
+        color: "#1e6355",
+        fontFamily: "Poppins_600SemiBold",
+        marginTop: 4,
+    },
+    photoWarning: {
+        fontSize: 12,
+        color: "#ff6b6b",
+        fontFamily: "Poppins_400Regular",
+        marginTop: -8,
+        marginBottom: 12,
+        fontStyle: "italic",
     },
 });

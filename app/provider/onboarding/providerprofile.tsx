@@ -115,16 +115,50 @@ export default function ProviderProfile() {
                 });
             }
 
-            // Clear storage and logout (includes message session cleanup)
+            console.log('🔄 Starting logout process...');
+            
+            // Force clear tokens FIRST (this is what actually works)
+            await AsyncStorage.removeItem('providerToken');
+            await AsyncStorage.removeItem('providerId');
+            await AsyncStorage.removeItem('providerUserName');
+            await AsyncStorage.removeItem('userData');
+            console.log('✅ Tokens force cleared');
+            
+            // Then call UserContext logout for state cleanup
             await logout();
+            console.log('✅ UserContext logout completed');
+            
+            // Verify tokens are cleared
+            const verifyToken = await AsyncStorage.getItem('providerToken');
+            const verifyId = await AsyncStorage.getItem('providerId');
+            console.log('🔍 Verification - Token:', verifyToken, 'ID:', verifyId);
+            
+            // Close modal
             closeLogout();
-            router.replace("/");
+            
+            // Small delay for UI
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            console.log('➡️ Redirecting to signin...');
+            
+            // Redirect to signin
+            router.replace("/provider/onboarding/signin");
         } catch (error) {
             console.error('Logout error:', error);
-            // Still proceed with logout even if push cleanup fails
-            await logout();
+            
+            // Force clear on error
+            try {
+                await AsyncStorage.removeItem('providerToken');
+                await AsyncStorage.removeItem('providerId');
+                await AsyncStorage.removeItem('providerUserName');
+                await AsyncStorage.removeItem('userData');
+            } catch (clearError) {
+                console.error('Failed to force clear tokens:', clearError);
+            }
+            
             closeLogout();
-            router.replace("/");
+            await new Promise(resolve => setTimeout(resolve, 200));
+            router.replace("/provider/onboarding/signin");
         }
     };
 
@@ -317,6 +351,7 @@ export default function ProviderProfile() {
                     exact_location: providerProfile?.exact_location || undefined,
                     profile_photo: providerProfile?.profile_photo || undefined,
                     valid_id: providerProfile?.valid_id || undefined,
+                    uli: providerProfile?.uli || undefined,
                 }}
             />
         </ApprovedScreenWrapper>

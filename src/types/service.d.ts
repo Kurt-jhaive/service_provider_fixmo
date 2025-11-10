@@ -3,6 +3,7 @@ export interface Service {
   service_title: string;
   service_description: string;
   service_startingprice: number;
+  warranty_days?: number;
   category_id?: number;
   certificate_id: number;
   servicelisting_isActive: boolean;
@@ -32,6 +33,7 @@ export interface CreateServiceRequest {
   service_title: string;
   service_description: string;
   service_startingprice: number;
+  warranty_days?: number;
   category_id?: number | string; // Can be number or string (from certificateservices.json)
   certificate_id: number;
   service_photos: {
@@ -51,7 +53,14 @@ export interface UpdateServiceRequest {
   service_title?: string; // ⚠️ Do not use - titles cannot be changed
   service_description?: string; // Description can be updated
   service_startingprice?: number; // Price can be updated
+  warranty_days?: number; // Warranty period can be updated
   servicelisting_isActive?: boolean; // Use toggle endpoint instead
+  photosToRemove?: number[]; // Array of photo IDs to delete
+  newPhotos?: {
+    uri: string;
+    name: string;
+    type: string;
+  }[]; // New photos to upload
 }
 
 export interface ServicesResponse {

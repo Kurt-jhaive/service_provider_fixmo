@@ -63,6 +63,7 @@ export default function AddServices() {
     const [showApprovedList, setShowApprovedList] = useState(false);
     const [description, setDescription] = useState("");
     const [price, setPrice] = useState("");
+    const [warrantyDays, setWarrantyDays] = useState("");
     const [images, setImages] = useState<{uri: string; name: string; type: string}[]>([]);
 
     useEffect(() => {
@@ -214,6 +215,15 @@ export default function AddServices() {
             Alert.alert("Invalid Price", "Please enter a valid price.");
             return;
         }
+        if (!warrantyDays || isNaN(parseInt(warrantyDays))) {
+            Alert.alert("Invalid Warranty Days", "Please enter a valid number of warranty days.");
+            return;
+        }
+        const warrantyDaysNum = parseInt(warrantyDays);
+        if (warrantyDaysNum < 7 || warrantyDaysNum > 14) {
+            Alert.alert("Invalid Warranty Days", "Warranty days must be between 7 and 14 days.");
+            return;
+        }
         if (images.length === 0) {
             Alert.alert("Missing Images", "Please upload at least one service image.");
             return;
@@ -266,6 +276,7 @@ export default function AddServices() {
                 service_title: selectedService,
                 service_description: description.trim(),
                 service_startingprice: parseFloat(price),
+                warranty_days: parseInt(warrantyDays),
                 certificate_id: selectedCertificate.id,
                 service_photos: images,
             } as any; // Type assertion since backend accepts string category_id
@@ -492,6 +503,35 @@ export default function AddServices() {
                     value={price}
                     onChangeText={setPrice}
                 />
+
+                {/* Warranty Days */}
+                <Text style={styles.label}>
+                    Warranty Days<Text style={styles.asterisk}>*</Text>
+                </Text>
+                <Text style={styles.helperText}>
+                    Number of days customers can request warranty work (7-14 days)
+                </Text>
+                <TextInput
+                    style={styles.inputBox}
+                    keyboardType="numeric"
+                    placeholder="Enter warranty days (7-14)"
+                    placeholderTextColor="#A0A0A0"
+                    value={warrantyDays}
+                    onChangeText={(val) => {
+                        // Only allow numbers
+                        const numericValue = val.replace(/[^0-9]/g, '');
+                        setWarrantyDays(numericValue);
+                    }}
+                    maxLength={2}
+                />
+                {warrantyDays && parseInt(warrantyDays) > 0 && (
+                    <View style={styles.warrantyInfoBox}>
+                        <Ionicons name="shield-checkmark" size={16} color="#1e6355" />
+                        <Text style={styles.warrantyInfoText}>
+                            Customers can request warranty work within {warrantyDays} days after service completion
+                        </Text>
+                    </View>
+                )}
             </ScrollView>
 
             {/* Fixed Add Button */}
@@ -745,6 +785,23 @@ const styles = StyleSheet.create({
         marginTop: -4,
         marginBottom: 8,
         textAlign: "center",
+    },
+    warrantyInfoBox: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#f0fafa",
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 4,
+        marginBottom: 12,
+        gap: 8,
+    },
+    warrantyInfoText: {
+        fontFamily: "Poppins_400Regular",
+        fontSize: 12,
+        color: "#1e6355",
+        flex: 1,
+        lineHeight: 18,
     },
     fixedButtonContainer: {
         position: "absolute",

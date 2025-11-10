@@ -1,24 +1,41 @@
-import React, {useState, useEffect, useRef} from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    View,
-    Text,
+    BackHandler,
     FlatList,
-    TextInput,
-    TouchableOpacity,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
-import {Ionicons} from "@expo/vector-icons";
-import {useLocalSearchParams} from "expo-router";
 
 export default function MessageScreen() {
+    const router = useRouter();
     const {name, messages} = useLocalSearchParams();
     const parsedMessages = messages ? JSON.parse(messages as string) : [];
 
     const [chatMessages, setChatMessages] = useState(parsedMessages);
     const [newMessage, setNewMessage] = useState("");
     const flatListRef = useRef<FlatList>(null);
+
+    // Prevent back to OTP screen - navigate to home instead
+    useFocusEffect(
+        React.useCallback(() => {
+            const onBackPress = () => {
+                router.replace('/provider/integration/fixmoto');
+                return true;
+            };
+
+            const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+            return () => subscription.remove();
+        }, [])
+    );
 
     // Auto scroll to bottom
     useEffect(() => {

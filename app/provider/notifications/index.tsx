@@ -2,10 +2,12 @@ import { markAllNotificationsAsRead, markNotificationAsRead } from '@/api/notifi
 import { useNotifications } from '@/context/NotificationContext';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    BackHandler,
     FlatList,
     RefreshControl,
     StatusBar,
@@ -32,6 +34,20 @@ export default function NotificationsScreen() {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+
+    // Prevent back to OTP screen - navigate to home instead
+    useFocusEffect(
+        useCallback(() => {
+            const onBackPress = () => {
+                router.replace('/provider/integration/fixmoto');
+                return true;
+            };
+
+            const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+            return () => subscription.remove();
+        }, [])
+    );
 
     // Notification fetching is disabled as the backend endpoint doesn't exist
     const fetchNotifications = async (showLoading = true) => {

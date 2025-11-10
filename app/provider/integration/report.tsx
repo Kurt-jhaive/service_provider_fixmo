@@ -5,11 +5,12 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Picker } from "@react-native-picker/picker";
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -22,7 +23,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getStatusText } from '../../../src/utils/penaltyHelpers';
-import { getPenaltyInfo, getViolationHistory } from '../../../src/utils/penaltyService';
+import { getPenaltyInfo, getViolationHistory, submitAppeal } from '../../../src/utils/penaltyService';
 
 const BACKEND_URL = API_CONFIG.BASE_URL;
 
@@ -54,6 +55,11 @@ const ProviderReportForm = () => {
   // Penalty/violation selection
   const [selectedViolationId, setSelectedViolationId] = useState("");
   const [violations, setViolations] = useState<any[]>([]);
+  const [penaltyAction, setPenaltyAction] = useState<"report" | "appeal">("report"); // New: track if reporting or appealing
+  
+  // Appeal-specific states
+  const [appealReason, setAppealReason] = useState("");
+  const [appealEvidence, setAppealEvidence] = useState<any[]>([]);
   
   // Customer information (auto-filled from selected appointment)
   const [customerName, setCustomerName] = useState("");
@@ -70,6 +76,20 @@ const ProviderReportForm = () => {
   const [penaltyScore, setPenaltyScore] = useState<number>(100);
   const [isSuspended, setIsSuspended] = useState<boolean>(false);
   const [penaltyStatus, setPenaltyStatus] = useState<string>('GOOD STANDING');
+
+  // Prevent back to OTP screen - navigate to profile instead
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        router.replace('/provider/onboarding/providerprofile');
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => subscription.remove();
+    }, [])
+  );
 
   // Load provider data and appointments
   useEffect(() => {
@@ -286,6 +306,130 @@ const ProviderReportForm = () => {
   // Remove image
   const removeImage = (index: number) => {
     setImages(images.filter((_, i) => i !== index));
+  };
+
+  // Pick appeal evidence images
+  const pickAppealEvidence = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Sorry, we need camera roll permissions to upload evidence.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        selectionLimit: 5 - appealEvidence.length,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newImages = result.assets.slice(0, 5 - appealEvidence.length);
+        setAppealEvidence([...appealEvidence, ...newImages]);
+        
+        if (result.assets.length > newImages.length) {
+          Alert.alert("Limit Reached", `Only ${newImages.length} image(s) added. Maximum 5 images allowed.`);
+        }
+      }
+    } catch (error) {
+      console.error('Error picking appeal evidence:', error);
+      Alert.alert("Error", "Failed to pick images. Please try again.");
+    }
+  };
+
+  // Remove appeal evidence
+  const removeAppealEvidence = (index: number) => {
+    setAppealEvidence(appealEvidence.filter((_, i) => i !== index));
+  };
+
+  // Handle appeal submission
+  const handleAppealSubmit = async () => {
+    if (!selectedViolationId) {
+      Alert.alert("Error", "Please select a penalty violation to appeal");
+      return;
+    }
+    if (!appealReason.trim()) {
+      Alert.alert("Error", "Please provide a reason for your appeal");
+      return;
+    }
+    if (appealReason.trim().length < 10) {
+      Alert.alert("Error", "Appeal reason must be at least 10 characters long");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      console.log('⚖️ Submitting penalty appeal...');
+      console.log('📋 Violation ID:', selectedViolationId);
+      console.log('📝 Appeal Reason Length:', appealReason.trim().length);
+      console.log('📎 Evidence Files:', appealEvidence.length);
+      
+      // Prepare evidence files if provided
+      let evidenceFiles: Array<{ uri: string; type: string; name: string }> | undefined = undefined;
+      
+      if (appealEvidence.length > 0) {
+        evidenceFiles = appealEvidence.map((image, index) => {
+          let imageUri = image.uri;
+          if (Platform.OS === 'ios' && imageUri.startsWith('file://')) {
+            imageUri = imageUri.replace('file://', '');
+          }
+
+          const uriParts = imageUri.split('/');
+          const fileName = image.fileName || uriParts[uriParts.length - 1] || `appeal_evidence_${index}.jpg`;
+          
+          let mimeType = 'image/jpeg';
+          if (fileName.endsWith('.png')) mimeType = 'image/png';
+          else if (fileName.endsWith('.gif')) mimeType = 'image/gif';
+          else if (fileName.endsWith('.webp')) mimeType = 'image/webp';
+
+          console.log(`📎 Evidence ${index + 1}:`, {
+            uri: imageUri.substring(0, 50) + '...',
+            type: mimeType,
+            name: fileName
+          });
+
+          return {
+            uri: imageUri,
+            type: mimeType,
+            name: fileName,
+          };
+        });
+      }
+
+      // Submit appeal with evidence files
+      const result = await submitAppeal(
+        parseInt(selectedViolationId),
+        appealReason.trim(),
+        evidenceFiles
+      );
+
+      if (result.success) {
+        Alert.alert(
+          "Appeal Submitted",
+          "Your penalty appeal has been submitted successfully. Admin will review your appeal and respond within 2-3 business days.",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                router.replace('/provider/onboarding/pre_homepage');
+              },
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          "Appeal Failed",
+          result.error || "Failed to submit appeal. Please try again."
+        );
+      }
+    } catch (error) {
+      console.error('❌ Error submitting appeal:', error);
+      Alert.alert("Error", "Failed to submit appeal. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const validateForm = () => {
@@ -628,12 +772,69 @@ const ProviderReportForm = () => {
               </View>
               
               {selectedViolationId && (
-                <View style={styles.infoBox}>
-                  <Ionicons name="information-circle" size={20} color="#008080" />
-                  <Text style={styles.infoText}>
-                    You selected a penalty violation to report. Please provide detailed information below.
+                <>
+                  <View style={styles.infoBox}>
+                    <Ionicons name="information-circle" size={20} color="#008080" />
+                    <Text style={styles.infoText}>
+                      You selected a penalty violation. Choose an action below.
+                    </Text>
+                  </View>
+
+                  {/* Action Selection: Report or Appeal */}
+                  <Text style={styles.label}>
+                    Action <Text style={{ color: "red" }}>*</Text>
                   </Text>
-                </View>
+                  <View style={styles.actionButtons}>
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButton,
+                        penaltyAction === 'report' && styles.actionButtonActive
+                      ]}
+                      onPress={() => setPenaltyAction('report')}
+                    >
+                      <Ionicons 
+                        name="flag" 
+                        size={20} 
+                        color={penaltyAction === 'report' ? '#FFFFFF' : '#008080'} 
+                      />
+                      <Text style={[
+                        styles.actionButtonText,
+                        penaltyAction === 'report' && styles.actionButtonTextActive
+                      ]}>
+                        Report Issue
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButton,
+                        penaltyAction === 'appeal' && styles.actionButtonActive
+                      ]}
+                      onPress={() => setPenaltyAction('appeal')}
+                    >
+                      <Ionicons 
+                        name="scale" 
+                        size={20} 
+                        color={penaltyAction === 'appeal' ? '#FFFFFF' : '#008080'} 
+                      />
+                      <Text style={[
+                        styles.actionButtonText,
+                        penaltyAction === 'appeal' && styles.actionButtonTextActive
+                      ]}>
+                        Appeal Penalty
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {penaltyAction === 'appeal' && (
+                    <View style={styles.appealInfoBox}>
+                      <Ionicons name="information-circle" size={20} color="#2196F3" />
+                      <Text style={styles.appealInfoText}>
+                        Submit an appeal if you believe this penalty was issued incorrectly. Include a detailed explanation and supporting evidence.
+                      </Text>
+                    </View>
+                  )}
+                </>
               )}
             </>
           )}
@@ -706,97 +907,164 @@ const ProviderReportForm = () => {
             </>
           )}
 
-          {/* Image Upload */}
-          <Text style={styles.label}>Attach Images (Optional)</Text>
-          <TouchableOpacity 
-            style={styles.imageButton} 
-            onPress={pickImages}
-            disabled={images.length >= 5}
-          >
-            <Ionicons name="camera-outline" size={24} color={images.length >= 5 ? "#999" : "#008080"} />
-            <Text style={[styles.imageButtonText, images.length >= 5 && { color: "#999" }]}>
-              Add Images ({images.length}/5)
-            </Text>
-          </TouchableOpacity>
-          
-          {images.length > 0 && (
-            <View style={styles.imagePreviewContainer}>
-              {images.map((image, index) => (
-                <View key={index} style={styles.imagePreview}>
-                  <Image source={{ uri: image.uri }} style={styles.previewImage} />
-                  <TouchableOpacity 
-                    style={styles.removeImageButton}
-                    onPress={() => removeImage(index)}
-                  >
-                    <Ionicons name="close-circle" size={24} color="#ff4444" />
-                  </TouchableOpacity>
+          {/* Conditional: Show appeal form or regular report form */}
+          {reportType === 'penalties' && penaltyAction === 'appeal' ? (
+            <>
+              {/* Appeal Reason */}
+              <Text style={styles.label}>
+                Appeal Reason <Text style={{ color: "red" }}>*</Text>
+              </Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Explain why you believe this penalty was issued incorrectly..."
+                value={appealReason}
+                onChangeText={setAppealReason}
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+              />
+              <Text style={styles.helperText}>
+                Provide a detailed explanation with relevant facts and context.
+              </Text>
+
+              {/* Appeal Evidence Upload */}
+              <Text style={styles.label}>Supporting Evidence (Optional but Recommended)</Text>
+              <TouchableOpacity 
+                style={styles.imageButton} 
+                onPress={pickAppealEvidence}
+                disabled={appealEvidence.length >= 5}
+              >
+                <Ionicons name="document-attach" size={24} color={appealEvidence.length >= 5 ? "#999" : "#2196F3"} />
+                <Text style={[styles.imageButtonText, appealEvidence.length >= 5 && { color: "#999" }]}>
+                  Add Evidence ({appealEvidence.length}/5)
+                </Text>
+              </TouchableOpacity>
+              
+              {appealEvidence.length > 0 && (
+                <View style={styles.imagePreviewContainer}>
+                  {appealEvidence.map((image, index) => (
+                    <View key={index} style={styles.imagePreview}>
+                      <Image source={{ uri: image.uri }} style={styles.previewImage} />
+                      <TouchableOpacity 
+                        style={styles.removeImageButton}
+                        onPress={() => removeAppealEvidence(index)}
+                      >
+                        <Ionicons name="close-circle" size={24} color="#ff4444" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
+              )}
+              
+              <Text style={styles.helperText}>
+                Upload screenshots, photos, or documents that support your appeal.
+              </Text>
+            </>
+          ) : (
+            <>
+              {/* Regular Report Form Fields */}
+              {/* Image Upload */}
+              <Text style={styles.label}>Attach Images (Optional)</Text>
+              <TouchableOpacity 
+                style={styles.imageButton} 
+                onPress={pickImages}
+                disabled={images.length >= 5}
+              >
+                <Ionicons name="camera-outline" size={24} color={images.length >= 5 ? "#999" : "#008080"} />
+                <Text style={[styles.imageButtonText, images.length >= 5 && { color: "#999" }]}>
+                  Add Images ({images.length}/5)
+                </Text>
+              </TouchableOpacity>
+              
+              {images.length > 0 && (
+                <View style={styles.imagePreviewContainer}>
+                  {images.map((image, index) => (
+                    <View key={index} style={styles.imagePreview}>
+                      <Image source={{ uri: image.uri }} style={styles.previewImage} />
+                      <TouchableOpacity 
+                        style={styles.removeImageButton}
+                        onPress={() => removeImage(index)}
+                      >
+                        <Ionicons name="close-circle" size={24} color="#ff4444" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+              
+              <Text style={styles.helperText}>
+                Max 5 images, 5MB each. Supported: JPEG, PNG, GIF, WebP
+              </Text>
+
+              {/* Subject */}
+              <Text style={styles.label}>
+                Subject <Text style={{ color: "red" }}>*</Text>
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Brief summary of the issue"
+                value={subject}
+                onChangeText={setSubject}
+              />
+            </>
           )}
-          
-          <Text style={styles.helperText}>
-            Max 5 images, 5MB each. Supported: JPEG, PNG, GIF, WebP
-          </Text>
 
-          {/* Subject */}
-          <Text style={styles.label}>
-            Subject <Text style={{ color: "red" }}>*</Text>
-          </Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Brief summary of the issue"
-            value={subject}
-            onChangeText={setSubject}
-          />
+          {/* Priority - Show for both */}
+          {!(reportType === 'penalties' && penaltyAction === 'appeal') && (
+            <>
+              {/* Priority */}
+              <Text style={styles.label}>
+                Priority <Text style={{ color: "red" }}>*</Text>
+              </Text>
+              <View style={styles.pickerWrapper}>
+                <Picker
+                  selectedValue={priority}
+                  onValueChange={(val) => setPriority(val)}
+                >
+                  <Picker.Item label="🟢 Low - Can Wait" value="low" />
+                  <Picker.Item label="🟡 Normal - Standard Priority" value="normal" />
+                  <Picker.Item label="🟠 High - Needs Attention Soon" value="high" />
+                  <Picker.Item label="🔴 Urgent - Immediate Attention" value="urgent" />
+                </Picker>
+              </View>
 
-          {/* Priority */}
-          <Text style={styles.label}>
-            Priority <Text style={{ color: "red" }}>*</Text>
-          </Text>
-          <View style={styles.pickerWrapper}>
-            <Picker
-              selectedValue={priority}
-              onValueChange={(val) => setPriority(val)}
-            >
-              <Picker.Item label="🟢 Low - Can Wait" value="low" />
-              <Picker.Item label="🟡 Normal - Standard Priority" value="normal" />
-              <Picker.Item label="🟠 High - Needs Attention Soon" value="high" />
-              <Picker.Item label="🔴 Urgent - Immediate Attention" value="urgent" />
-            </Picker>
-          </View>
-
-          {/* Description */}
-          <Text style={styles.label}>
-            Description <Text style={{ color: "red" }}>*</Text>
-          </Text>
-          <TextInput
-            style={[styles.input, { height: 120, textAlignVertical: "top" }]}
-            placeholder="Describe the issue in detail. Include steps to reproduce if it's a bug, or relevant details for complaints/feedback..."
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={6}
-          />
+              {/* Description */}
+              <Text style={styles.label}>
+                Description <Text style={{ color: "red" }}>*</Text>
+              </Text>
+              <TextInput
+                style={[styles.input, { height: 120, textAlignVertical: "top" }]}
+                placeholder="Describe the issue in detail. Include steps to reproduce if it's a bug, or relevant details for complaints/feedback..."
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                numberOfLines={6}
+              />
+            </>
+          )}
 
           {/* Information Box */}
           <View style={styles.infoBox}>
             <Ionicons name="information-circle" size={20} color="#008080" style={{ marginRight: 8 }} />
             <Text style={styles.infoText}>
-              Our admin team will review your report and respond via email within 24-48 hours.
+              {reportType === 'penalties' && penaltyAction === 'appeal'
+                ? 'Your appeal will be reviewed by the admin team within 2-3 business days.'
+                : 'Our admin team will review your report and respond via email within 24-48 hours.'}
             </Text>
           </View>
 
           {/* Submit Button */}
           <TouchableOpacity 
             style={[styles.button, loading && { opacity: 0.6 }]} 
-            onPress={handleSubmit}
+            onPress={reportType === 'penalties' && penaltyAction === 'appeal' ? handleAppealSubmit : handleSubmit}
             disabled={loading}
           >
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Submit Report</Text>
+              <Text style={styles.buttonText}>
+                {reportType === 'penalties' && penaltyAction === 'appeal' ? 'Submit Appeal' : 'Submit Report'}
+              </Text>
             )}
           </TouchableOpacity>
 
@@ -1040,6 +1308,59 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     fontFamily: "PoppinsSemiBold",
+  },
+  // Action button styles for Report vs Appeal
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#008080',
+    backgroundColor: '#fff',
+    gap: 8,
+  },
+  actionButtonActive: {
+    backgroundColor: '#008080',
+    borderColor: '#008080',
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#008080',
+    fontFamily: 'PoppinsSemiBold',
+  },
+  actionButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  appealInfoBox: {
+    flexDirection: 'row',
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    alignItems: 'flex-start',
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  appealInfoText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#1976D2",
+    lineHeight: 18,
+    fontFamily: "PoppinsRegular",
+    marginLeft: 8,
+  },
+  textArea: {
+    height: 120,
+    textAlignVertical: 'top',
   },
 });
 

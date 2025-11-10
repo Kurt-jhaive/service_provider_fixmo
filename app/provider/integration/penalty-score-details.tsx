@@ -3,25 +3,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    BackHandler,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AnimatedScoreCircle from 'src/components/AnimatedScoreCircle';
 import { getStatusColor, getStatusText } from 'src/utils/penaltyHelpers';
 import {
-  getPenaltyInfo,
-  getRestorationHistory,
-  getRewardStats,
-  getViolationHistory,
+    getPenaltyInfo,
+    getRestorationHistory,
+    getRewardStats,
+    getViolationHistory,
 } from 'src/utils/penaltyService';
 
 const PenaltyScorePage = () => {
@@ -43,6 +44,14 @@ const PenaltyScorePage = () => {
   // Use useFocusEffect to reload data when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      // Prevent back to OTP screen - navigate to profile instead
+      const onBackPress = () => {
+        router.replace('/provider/onboarding/providerprofile');
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
       const checkAndLoadData = async () => {
         console.log('🔄 Screen focused, checking provider...');
         
@@ -99,6 +108,7 @@ const PenaltyScorePage = () => {
       // Cleanup when screen loses focus
       return () => {
         console.log('🧹 Screen unfocused, ready for next provider');
+        subscription.remove();
       };
     }, [currentProviderId])
   );

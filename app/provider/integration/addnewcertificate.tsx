@@ -3,11 +3,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Picker } from "@react-native-picker/picker";
 import * as DocumentPicker from "expo-document-picker";
-import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    BackHandler,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -54,6 +55,20 @@ export default function AddNewCertificate() {
     });
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [uploading, setUploading] = useState(false);
+
+    // Prevent back to OTP screen - navigate to profile instead
+    useFocusEffect(
+        useCallback(() => {
+            const onBackPress = () => {
+                router.replace('/provider/onboarding/providerprofile');
+                return true;
+            };
+
+            const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+            return () => subscription.remove();
+        }, [])
+    );
 
     const handleAdd = async () => {
         // Validation - ALL fields are now required
@@ -177,9 +192,17 @@ export default function AddNewCertificate() {
                         </View>
                         <TextInput
                             style={styles.input}
-                            placeholder="Enter certificate number"
+                            placeholder="Enter 14-digit certificate number"
                             value={certificate.number}
-                            onChangeText={(val) => setCertificate({...certificate, number: val})}
+                            onChangeText={(val) => {
+                                // Only allow numbers and limit to 14 digits
+                                const numericValue = val.replace(/[^0-9]/g, '');
+                                if (numericValue.length <= 14) {
+                                    setCertificate({...certificate, number: numericValue});
+                                }
+                            }}
+                            keyboardType="numeric"
+                            maxLength={14}
                         />
 
                         <View style={styles.labelRow}>
@@ -204,11 +227,69 @@ export default function AddNewCertificate() {
                                 onChange={(event, selectedDate) => {
                                     setShowDatePicker(false);
                                     if (selectedDate) {
-                                        setCertificate({...certificate, expiry: selectedDate});
+                                        const today = new Date();
+                                        today.setHours(0, 0, 0, 0);
+                                        
+                                        const selected = new Date(selectedDate);
+                                        selected.setHours(0, 0, 0, 0);
+                                        
+                                        // Check if date is in the past
+                                        if (selected < today) {
+                                            Alert.alert(
+                                                "Invalid Date",
+                                                "Certificate expiry date cannot be in the past."
+                                            );
+                                            return;
+                                        }
+                                        
+                                        // Check if certificate is expiring within 1 month (warning only)
+                                        const oneMonthFromNow = new Date();
+                                        oneMonthFromNow.setMonth(oneMonthFromNow.getMonth() + 1);
+                                        oneMonthFromNow.setHours(0, 0, 0, 0);
+                                        
+                                        if (selected <= oneMonthFromNow) {
+                                            Alert.alert(
+                                                "Certificate Expiring Soon",
+                                                "This certificate will expire within 1 month. You can still add it, but please renew it soon to avoid service interruption.",
+                                                [
+                                                    {
+                                                        text: "OK",
+                                                        onPress: () => {
+                                                            setCertificate({...certificate, expiry: selectedDate});
+                                                        }
+                                                    }
+                                                ]
+                                            );
+                                        } else {
+                                            setCertificate({...certificate, expiry: selectedDate});
+                                        }
                                     }
                                 }}
                             />
                         )}
+
+                        {/* Show expiry warning if date is within 1 month */}
+                        {certificate.expiry && (() => {
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            const expiry = new Date(certificate.expiry);
+                            expiry.setHours(0, 0, 0, 0);
+                            const oneMonthFromNow = new Date();
+                            oneMonthFromNow.setMonth(oneMonthFromNow.getMonth() + 1);
+                            oneMonthFromNow.setHours(0, 0, 0, 0);
+                            
+                            if (expiry <= oneMonthFromNow && expiry >= today) {
+                                return (
+                                    <View style={{backgroundColor: '#FFF3E0', padding: 10, borderRadius: 8, marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                                        <Ionicons name="warning" size={20} color="#FF9800" />
+                                        <Text style={{color: '#E65100', fontSize: 12, flex: 1}}>
+                                            Certificate expires soon. Please renew to avoid service interruption.
+                                        </Text>
+                                    </View>
+                                );
+                            }
+                            return null;
+                        })()}
 
                         <View style={styles.labelRow}>
                             <Text style={styles.title}>Upload Certificate File</Text>

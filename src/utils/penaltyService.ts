@@ -220,9 +220,13 @@ export const getViolationHistory = async (status: string | null = null, limit = 
 };
 
 /**
- * Submit an appeal for a violation
+ * Submit an appeal for a violation with optional evidence files
  */
-export const submitAppeal = async (violationId: number, appealReason: string) => {
+export const submitAppeal = async (
+  violationId: number, 
+  appealReason: string, 
+  evidenceFiles?: Array<{ uri: string; type: string; name: string }>
+) => {
   try {
     const token = await getAuthToken();
     if (!token) {
@@ -235,13 +239,31 @@ export const submitAppeal = async (violationId: number, appealReason: string) =>
     console.log('🔍 Submitting appeal for violation:', violationId);
     console.log('🔍 Appeal URL:', `${BACKEND_URL}/api/penalty/appeal/${violationId}`);
 
+    // Create FormData for multipart/form-data submission
+    const formData = new FormData();
+    formData.append('appealReason', appealReason);
+
+    // Add evidence files if provided
+    if (evidenceFiles && evidenceFiles.length > 0) {
+      console.log('🔍 Appeal includes', evidenceFiles.length, 'evidence file(s)');
+      evidenceFiles.forEach((file, index) => {
+        console.log(`� Evidence ${index + 1}:`, file.name);
+        // @ts-ignore - React Native FormData accepts this format
+        formData.append('evidence', {
+          uri: file.uri,
+          type: file.type,
+          name: file.name,
+        });
+      });
+    }
+
     const response = await fetch(`${BACKEND_URL}/api/penalty/appeal/${violationId}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
+        // Don't set Content-Type - let the browser/fetch set it with boundary
       },
-      body: JSON.stringify({ appealReason }),
+      body: formData,
     });
 
     console.log('🔍 Appeal Response Status:', response.status);

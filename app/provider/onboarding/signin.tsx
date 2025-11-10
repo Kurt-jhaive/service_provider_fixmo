@@ -27,6 +27,43 @@ export default function SignIn() {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
 
+    // Immediate check on mount - before any delay
+    React.useEffect(() => {
+        (async () => {
+            const immediateToken = await AsyncStorage.getItem('providerToken');
+            const immediateId = await AsyncStorage.getItem('providerId');
+            console.log('🚨 IMMEDIATE CHECK on signin mount - Token:', immediateToken ? 'EXISTS' : 'null', 'ID:', immediateId ? 'EXISTS' : 'null');
+        })();
+    }, []);
+
+    // Check if user is already logged in on mount
+    React.useEffect(() => {
+        const timer = setTimeout(() => {
+            checkExistingSession();
+        }, 500); // Longer delay to ensure AsyncStorage is fully updated after logout
+        
+        return () => clearTimeout(timer);
+    }, []);
+
+    const checkExistingSession = async () => {
+        try {
+            const token = await AsyncStorage.getItem('providerToken');
+            const providerId = await AsyncStorage.getItem('providerId');
+            
+            console.log('🔍 SignIn - Checking for existing session:', { hasToken: !!token, hasProviderId: !!providerId });
+            
+            if (token && providerId) {
+                console.log('✅ Active session found, redirecting to home');
+                // User already logged in, redirect to home
+                router.replace("/provider/onboarding/pre_homepage");
+            } else {
+                console.log('❌ No active session, staying on signin');
+            }
+        } catch (error) {
+            console.error('Error checking session:', error);
+        }
+    };
+
     const handleSignIn = async () => {
         // Validation
         if (!email.trim()) {

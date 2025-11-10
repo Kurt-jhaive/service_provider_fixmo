@@ -152,7 +152,7 @@ export const UserProvider = ({children}: { children: React.ReactNode }) => {
     }, []);
 
     const logout = async () => {
-        console.log('🚪 Logging out - clearing all session data');
+        console.log('🚪 ========== LOGOUT STARTED ==========');
         
         // Reset user state
         setUser({
@@ -163,50 +163,80 @@ export const UserProvider = ({children}: { children: React.ReactNode }) => {
             profileImage: "",
             scheduledWork: undefined,
         });
+        console.log('✅ User state reset');
 
         setNotifications([]);
         setArchivedNotifications([]);
+        console.log('✅ Notifications cleared');
         
         // Reset MessageService to clear cached conversations and disconnect socket
         try {
             const { MessageService } = require('../utils/messageAPI');
             MessageService.reset();
-            console.log('🧹 MessageService reset on logout');
+            console.log('✅ MessageService reset on logout');
         } catch (error) {
-            console.error('Failed to reset MessageService:', error);
+            console.error('❌ Failed to reset MessageService:', error);
         }
 
         // Clear all AsyncStorage data related to authentication and sessions
         try {
             // First get all keys to see what we're dealing with
             const allKeys = await AsyncStorage.getAllKeys();
-            console.log('📋 All AsyncStorage keys before logout:', allKeys);
+            console.log('📋 All AsyncStorage keys BEFORE logout:', allKeys);
             
             const keysToRemove = [
                 'providerToken',
                 'providerId',
                 'provider_id',
+                'providerUserName',
                 'userToken',
                 'userId',
                 'user_id',
                 'fcmToken',
                 'expoPushToken',
+                'userData',
             ];
             
-            // Filter to only remove keys that exist
-            const existingKeysToRemove = keysToRemove.filter(key => allKeys.includes(key));
-            
-            if (existingKeysToRemove.length > 0) {
-                await AsyncStorage.multiRemove(existingKeysToRemove);
-                console.log('🗑️ Cleared AsyncStorage session data:', existingKeysToRemove);
+            // Remove each key individually to ensure they're cleared
+            console.log('🗑️ Starting to remove keys...');
+            for (const key of keysToRemove) {
+                try {
+                    await AsyncStorage.removeItem(key);
+                    console.log(`  ✅ Removed: ${key}`);
+                } catch (err) {
+                    console.error(`  ❌ Failed to remove ${key}:`, err);
+                }
             }
             
-            // Verify clearance
+            // Verify clearance with a small delay
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
             const remainingKeys = await AsyncStorage.getAllKeys();
-            console.log('📋 Remaining AsyncStorage keys after logout:', remainingKeys);
+            console.log('📋 Remaining AsyncStorage keys AFTER logout:', remainingKeys);
+            
+            // Double-check critical keys are gone
+            const tokenCheck = await AsyncStorage.getItem('providerToken');
+            const idCheck = await AsyncStorage.getItem('providerId');
+            console.log('🔍 Final verification - Token:', tokenCheck, 'ID:', idCheck);
+            
+            if (tokenCheck || idCheck) {
+                console.error('⚠️ WARNING: Tokens still exist after logout! Attempting force clear...');
+                // Force clear again
+                await AsyncStorage.removeItem('providerToken');
+                await AsyncStorage.removeItem('providerId');
+                
+                // Final check
+                const finalTokenCheck = await AsyncStorage.getItem('providerToken');
+                const finalIdCheck = await AsyncStorage.getItem('providerId');
+                console.log('🔍 After force clear - Token:', finalTokenCheck, 'ID:', finalIdCheck);
+            } else {
+                console.log('✅ Tokens successfully cleared');
+            }
         } catch (error) {
-            console.error('Failed to clear AsyncStorage on logout:', error);
+            console.error('❌ Failed to clear AsyncStorage on logout:', error);
         }
+        
+        console.log('🚪 ========== LOGOUT COMPLETED ==========');
     };
 
     const notificationCount = notifications.filter((n) => !n.read).length;

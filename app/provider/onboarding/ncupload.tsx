@@ -566,9 +566,38 @@ export default function RequirementsUpload() {
                                     value={cert.expiry || new Date()}
                                     mode="date"
                                     display="default"
+                                    minimumDate={new Date()} // Prevent selecting past dates
                                     onChange={(event, selectedDate) => {
                                         setShowDatePicker(null);
                                         if (selectedDate) {
+                                            const today = new Date();
+                                            today.setHours(0, 0, 0, 0);
+                                            
+                                            const selected = new Date(selectedDate);
+                                            selected.setHours(0, 0, 0, 0);
+                                            
+                                            // Check if date is in the past
+                                            if (selected < today) {
+                                                Alert.alert(
+                                                    "Invalid Date",
+                                                    "Certificate expiry date cannot be in the past."
+                                                );
+                                                return;
+                                            }
+                                            
+                                            // Check if certificate is expiring within 1 month (warning only)
+                                            const oneMonthFromNow = new Date();
+                                            oneMonthFromNow.setMonth(oneMonthFromNow.getMonth() + 1);
+                                            oneMonthFromNow.setHours(0, 0, 0, 0);
+                                            
+                                            if (selected <= oneMonthFromNow) {
+                                                Alert.alert(
+                                                    "Certificate Expiring Soon",
+                                                    "This certificate will expire within 1 month. You can still register, but please renew it soon to avoid service interruption.",
+                                                    [{ text: "OK" }]
+                                                );
+                                            }
+                                            
                                             const updated = [...certificates];
                                             updated[index].expiry = selectedDate;
                                             setCertificates(updated);
@@ -576,6 +605,29 @@ export default function RequirementsUpload() {
                                     }}
                                 />
                             )}
+
+                            {/* Show expiry warning if date is within 1 month */}
+                            {cert.expiry && (() => {
+                                const today = new Date();
+                                today.setHours(0, 0, 0, 0);
+                                const expiry = new Date(cert.expiry);
+                                expiry.setHours(0, 0, 0, 0);
+                                const oneMonthFromNow = new Date();
+                                oneMonthFromNow.setMonth(oneMonthFromNow.getMonth() + 1);
+                                oneMonthFromNow.setHours(0, 0, 0, 0);
+                                
+                                if (expiry <= oneMonthFromNow && expiry >= today) {
+                                    return (
+                                        <View style={{backgroundColor: '#FFF3E0', padding: 10, borderRadius: 8, marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                                            <Ionicons name="warning" size={20} color="#FF9800" />
+                                            <Text style={{color: '#E65100', fontSize: 12, flex: 1}}>
+                                                Certificate expires soon. Please renew to avoid service interruption.
+                                            </Text>
+                                        </View>
+                                    );
+                                }
+                                return null;
+                            })()}
 
                             {/* Upload Certificate */}
                             <Text style={styles.title}>Upload Certificate File</Text>

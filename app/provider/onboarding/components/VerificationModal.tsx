@@ -37,6 +37,7 @@ interface VerificationModalProps {
         exact_location?: string;
         profile_photo?: string;
         valid_id?: string;
+        uli?: string;
     };
 }
 
@@ -52,6 +53,8 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
     const [birthday, setBirthday] = useState<Date | null>(
         currentUserData?.birthday ? new Date(currentUserData.birthday) : null
     );
+    const [uliNumber, setUliNumber] = useState(currentUserData?.uli || ""); // ULI field
+    const [showUliTooltip, setShowUliTooltip] = useState(false); // ULI tooltip
     const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(
         currentUserData?.profile_photo || null
     );
@@ -104,6 +107,36 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
         }
         return age;
     };
+
+    // Parse location on mount if currentUserData has location
+    useEffect(() => {
+        if (visible && currentUserData?.location && currentUserData?.exact_location) {
+            // Parse location string (format: "Barangay, City, District")
+            const parts = currentUserData.location.split(', ').map(p => p.trim());
+            if (parts.length >= 3) {
+                const barangay = parts[0];
+                const city = parts[1];
+                const districtDisplay = parts[2];
+                
+                // Find the matching district key from display name
+                const districtKey = Object.keys(districtDisplayNames).find(
+                    key => districtDisplayNames[key] === districtDisplay
+                );
+                
+                if (districtKey) {
+                    setSelectedDistrict(districtKey);
+                    setSelectedCity(city);
+                    setSelectedBarangay(barangay);
+                }
+            }
+            
+            // Parse exact_location (format: "lat,lng")
+            const coords = currentUserData.exact_location.split(',').map(c => parseFloat(c.trim()));
+            if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                setLocationCoordinates({ lat: coords[0], lng: coords[1] });
+            }
+        }
+    }, [visible, currentUserData]);
 
     const pickProfilePhoto = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -300,6 +333,12 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
             return;
         }
 
+        // Validate ULI (required and must be 19 characters in format ULI-XXX-XX-XXX-XXXXX-XXX)
+        if (!uliNumber || uliNumber.replace(/-/g, '').length < 19) {
+            Alert.alert("Validation Error", "Please complete the ULI format: ULI-XXX-XX-XXX-XXXXX-XXX");
+            return;
+        }
+
         setSubmitting(true);
 
         try {
@@ -310,16 +349,19 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
             }
 
             const formData = new FormData();
-            formData.append("first_name", firstName);
-            formData.append("last_name", lastName);
-            formData.append("birthday", birthday.toISOString().split("T")[0]);
+            
+            // Provider information fields (matching backend API spec)
+            formData.append("provider_first_name", firstName);
+            formData.append("provider_last_name", lastName);
+            formData.append("provider_birthday", birthday.toISOString().split("T")[0]);
+            formData.append("provider_uli", uliNumber);
             
             // Format location as "Barangay, City, District"
             const userLocation = `${selectedBarangay}, ${selectedCity}, ${districtDisplayNames[selectedDistrict] || selectedDistrict}`;
-            formData.append("location", userLocation);
+            formData.append("provider_location", userLocation);
 
-            // Add provider_exact_location from map coordinates (backend field name)
-            formData.append("provider_exact_location", `${locationCoordinates.lat},${locationCoordinates.lng}`);
+            // Add exact_location from map coordinates
+            formData.append("exact_location", `${locationCoordinates.lat},${locationCoordinates.lng}`);
 
             // Handle profile photo
             if (profilePhotoUri.startsWith("http")) {
@@ -351,6 +393,18 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
                 } as any);
             }
 
+            // Log formData for debugging
+            console.log("=== Submitting Verification Resubmit ===");
+            console.log("First Name:", firstName);
+            console.log("Last Name:", lastName);
+            console.log("ULI:", uliNumber);
+            console.log("Birthday:", birthday.toISOString().split("T")[0]);
+            console.log("Location:", userLocation);
+            console.log("Exact Location:", `${locationCoordinates.lat},${locationCoordinates.lng}`);
+            console.log("Profile Photo:", profilePhotoUri.startsWith("http") ? "URL" : "New Upload");
+            console.log("Valid ID:", validIdUri.startsWith("http") ? "URL" : "New Upload");
+            console.log("========================================");
+
             const response = await fetch(`${BACKEND_URL}/api/verification/provider/resubmit`, {
                 method: "POST",
                 headers: {
@@ -358,6 +412,9 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
                 },
                 body: formData,
             });
+
+            const responseData = await response.json();
+            console.log("Backend response:", responseData);
 
             if (response.ok) {
                 Alert.alert(
@@ -376,8 +433,8 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
                     ]
                 );
             } else {
-                const errorData = await response.json();
-                Alert.alert("Error", errorData.message || "Failed to submit verification");
+                Alert.alert("Error", responseData.message || "Failed to submit verification");
+                console.error("Submission error:", responseData);
             }
         } catch (error) {
             console.error("Error submitting verification:", error);
@@ -511,6 +568,102 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
                             return eighteenYearsAgo;
                         })()}
                     />
+
+                    {/* ULI Number */}
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.label}>
+                            Unique Learner Identifier (ULI Format) <Text style={styles.required}>*</Text>
+                        </Text>
+                        <View style={styles.uliRow}>
+                            <TextInput
+                                style={[styles.input, { flex: 1 }]}
+                                placeholder="ULI-XXX-XX-XXX-XXXXX-XXX"
+                                keyboardType="default"
+                                maxLength={29}
+                                value={uliNumber}
+                                onChangeText={(val) => {
+                                    // Remove all non-alphanumeric characters except dashes
+                                    let cleanText = val.replace(/[^A-Z0-9-]/gi, '').toUpperCase();
+                                    
+                                    // If user is deleting, just update with cleaned text
+                                    if (cleanText.length < uliNumber.length) {
+                                        setUliNumber(cleanText);
+                                        return;
+                                    }
+                                    
+                                    // Remove dashes to work with raw characters
+                                    const rawText = cleanText.replace(/-/g, '');
+                                    
+                                    // Auto-add "ULI" prefix if not present
+                                    let formatted = '';
+                                    if (!rawText.startsWith('ULI')) {
+                                        formatted = 'ULI';
+                                        // Add the characters after ULI
+                                        const remaining = rawText;
+                                        
+                                        // Format: ULI-MNG-03-062-03014-001
+                                        // Positions: ULI(3)-MNG(3)-03(2)-062(3)-03014(5)-001(3) = 19 chars total
+                                        if (remaining.length > 0) {
+                                            formatted += '-' + remaining.substring(0, 3); // MNG
+                                        }
+                                        if (remaining.length > 3) {
+                                            formatted += '-' + remaining.substring(3, 5); // 03
+                                        }
+                                        if (remaining.length > 5) {
+                                            formatted += '-' + remaining.substring(5, 8); // 062
+                                        }
+                                        if (remaining.length > 8) {
+                                            formatted += '-' + remaining.substring(8, 13); // 03014
+                                        }
+                                        if (remaining.length > 13) {
+                                            formatted += '-' + remaining.substring(13, 16); // 001
+                                        }
+                                    } else {
+                                        // If it already has ULI, format the entire string
+                                        formatted = 'ULI';
+                                        const remaining = rawText.substring(3);
+                                        
+                                        if (remaining.length > 0) {
+                                            formatted += '-' + remaining.substring(0, 3);
+                                        }
+                                        if (remaining.length > 3) {
+                                            formatted += '-' + remaining.substring(3, 5);
+                                        }
+                                        if (remaining.length > 5) {
+                                            formatted += '-' + remaining.substring(5, 8);
+                                        }
+                                        if (remaining.length > 8) {
+                                            formatted += '-' + remaining.substring(8, 13);
+                                        }
+                                        if (remaining.length > 13) {
+                                            formatted += '-' + remaining.substring(13, 16);
+                                        }
+                                    }
+                                    
+                                    setUliNumber(formatted);
+                                }}
+                            />
+                            <TouchableOpacity onPress={() => setShowUliTooltip(!showUliTooltip)}>
+                                <Ionicons
+                                    name="help-circle-outline"
+                                    size={20}
+                                    color="#008080"
+                                />
+                            </TouchableOpacity>
+                        </View>
+                        {showUliTooltip && (
+                            <View style={styles.tooltipBox}>
+                                <Text style={styles.tooltipText}>
+                                    Unified Learner Identifier (ULI) issued by TESDA. Format: ULI-XXX-XX-XXX-XXXXX-XXX
+                                </Text>
+                            </View>
+                        )}
+                        {uliNumber && uliNumber.replace(/-/g, '').length < 19 && (
+                            <Text style={styles.errorText}>
+                                Complete format: ULI-XXX-XX-XXX-XXXXX-XXX ({uliNumber.replace(/-/g, '').length}/19 characters)
+                            </Text>
+                        )}
+                    </View>
 
                     {/* Location Cascading - NCR Districts */}
                     <Text style={styles.sectionTitle}>Location (NCR Only)</Text>
@@ -876,6 +1029,29 @@ const styles = StyleSheet.create({
         color: "#008080",
         marginTop: 6,
         fontStyle: "italic",
+    },
+    tooltipBox: {
+        backgroundColor: "#e8f5f5",
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 10,
+        borderLeftWidth: 3,
+        borderLeftColor: "#008080",
+    },
+    tooltipText: {
+        fontSize: 13,
+        color: "#333",
+        lineHeight: 18,
+    },
+    errorText: {
+        fontSize: 12,
+        color: "#ff4444",
+        marginTop: 6,
+    },
+    uliRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
     },
     selectButton: {
         flexDirection: "row",

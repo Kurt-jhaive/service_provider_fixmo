@@ -33,6 +33,11 @@ export const getProviderServices = async (token: string): Promise<Service[]> => 
     // Log raw response to debug (only first service to avoid clutter)
     if (data.data && data.data.length > 0) {
       console.log('📋 Raw service from backend:', JSON.stringify(data.data[0], null, 2));
+      console.log('📋 Certificate ID field check:', {
+        certificate_id: data.data[0].certificate_id,
+        certificateId: (data.data[0] as any).certificateId,
+        allKeys: Object.keys(data.data[0])
+      });
     }
 
     // Backend inconsistency: GET endpoint returns different field names than database schema
@@ -45,6 +50,12 @@ export const getProviderServices = async (token: string): Promise<Service[]> => 
       const serviceId = (service as any).id || service.service_id;
       const serviceTitle = (service as any).title || service.service_title;
       
+      // Check all possible variations for certificate_id
+      const certificateId = service.certificate_id || 
+                           (service as any).certificateId || 
+                           (service as any).certificate_ids?.[0] ||
+                           (service as any).certificates?.[0]?.certificate_id;
+      
       // Check all possible variations for the active status field
       const isActive = service.servicelisting_isActive ?? 
                       (service as any).isActive ?? 
@@ -55,10 +66,11 @@ export const getProviderServices = async (token: string): Promise<Service[]> => 
         ...service,
         service_id: serviceId,
         service_title: serviceTitle,
+        certificate_id: certificateId,
         servicelisting_isActive: Boolean(isActive)
       };
       
-      console.log(`✅ Service ${serviceId} (${serviceTitle}): isActive=${isActive} → converted=${convertedService.servicelisting_isActive}`);
+      console.log(`✅ Service ${serviceId} (${serviceTitle}): isActive=${isActive}, certificateId=${certificateId}`);
       
       return convertedService;
     });
@@ -86,6 +98,10 @@ export const createService = async (
     formData.append('service_startingprice', serviceData.service_startingprice.toString());
     formData.append('certificate_id', serviceData.certificate_id.toString());
     
+    if (serviceData.warranty_days !== undefined) {
+      formData.append('warranty_days', serviceData.warranty_days.toString());
+    }
+    
     if (serviceData.category_id) {
       formData.append('category_id', serviceData.category_id.toString());
     }
@@ -100,6 +116,18 @@ export const createService = async (
     });
 
     console.log('Creating service:', serviceData.service_title);
+    console.log('Warranty days being sent:', serviceData.warranty_days);
+    console.log('📦 FormData includes warranty_days:', serviceData.warranty_days !== undefined);
+    
+    // Log all FormData entries for debugging
+    console.log('📋 Complete service data being sent:', {
+      service_title: serviceData.service_title,
+      service_startingprice: serviceData.service_startingprice,
+      warranty_days: serviceData.warranty_days,
+      certificate_id: serviceData.certificate_id,
+      category_id: serviceData.category_id,
+      photos_count: serviceData.service_photos.length
+    });
 
     const response = await fetch(
       `${API_CONFIG.BASE_URL}/api/services/services`,
@@ -107,7 +135,7 @@ export const createService = async (
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
+          // Do NOT set Content-Type for FormData - let fetch set it automatically with boundary
         },
         body: formData,
       }
@@ -128,9 +156,9 @@ export const createService = async (
 };
 
 /**
- * Update an existing service
+ * Update an existing service with photo management
  * @param serviceId - Service ID
- * @param updateData - Fields to update
+ * @param updateData - Fields to update including photo changes
  * @param token - JWT authentication token
  */
 export const updateService = async (
@@ -139,25 +167,85 @@ export const updateService = async (
   token: string
 ): Promise<Service> => {
   try {
-    const response = await fetch(
-      `${API_CONFIG.BASE_URL}/api/services/services/${serviceId}`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updateData),
+    // Check if we have photos to add or remove - use FormData
+    const hasPhotoChanges = 
+      (updateData.photosToRemove && updateData.photosToRemove.length > 0) ||
+      (updateData.newPhotos && updateData.newPhotos.length > 0);
+
+    if (hasPhotoChanges) {
+      // Use FormData for multipart/form-data
+      const formData = new FormData();
+      
+      formData.append('service_description', updateData.service_description || '');
+      formData.append('service_startingprice', updateData.service_startingprice?.toString() || '0');
+      
+      if (updateData.warranty_days !== undefined) {
+        formData.append('warranty_days', updateData.warranty_days.toString());
       }
-    );
 
-    const data: ServiceResponse = await response.json();
+      // Add photos to remove
+      if (updateData.photosToRemove && updateData.photosToRemove.length > 0) {
+        formData.append('photos_to_remove', JSON.stringify(updateData.photosToRemove));
+      }
 
-    if (!response.ok) {
-      throw new Error(data.message || 'Failed to update service');
+      // Add new photos
+      if (updateData.newPhotos && updateData.newPhotos.length > 0) {
+        updateData.newPhotos.forEach((photo) => {
+          formData.append('service_photos', {
+            uri: photo.uri,
+            name: photo.name,
+            type: photo.type,
+          } as any);
+        });
+      }
+
+      console.log('Updating service with photos:', {
+        serviceId,
+        photosToRemove: updateData.photosToRemove?.length || 0,
+        newPhotos: updateData.newPhotos?.length || 0,
+      });
+
+      const response = await fetch(
+        `${API_CONFIG.BASE_URL}/api/services/services/${serviceId}`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            // Do NOT set Content-Type for FormData - let fetch set it automatically with boundary
+          },
+          body: formData,
+        }
+      );
+
+      const data: ServiceResponse = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to update service');
+      }
+
+      return data.data;
+    } else {
+      // No photo changes - use JSON
+      const response = await fetch(
+        `${API_CONFIG.BASE_URL}/api/services/services/${serviceId}`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updateData),
+        }
+      );
+
+      const data: ServiceResponse = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to update service');
+      }
+
+      return data.data;
     }
-
-    return data.data;
   } catch (error: any) {
     console.error('Update Service Error:', error);
     throw new Error(error.message || 'Network error. Please try again.');

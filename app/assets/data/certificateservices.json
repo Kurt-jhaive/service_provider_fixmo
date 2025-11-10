@@ -282,5 +282,36 @@
         "startingPrice": { "min": 500, "max": 1500 }
       }
     ]
+  },
+  {
+    "id": "smaw-welding-ncii",
+    "title": "Shielded Metal Arc Welding (SMAW) NCII",
+    "services": [
+      {
+        "title": "Gate and Fence Fabrication & Welding",
+        "description": "Fabricating and welding steel gates, grills, fences, and metal railings based on client measurements and design.",
+        "startingPrice": { "min": 1500, "max": 6000 }
+      },
+      {
+        "title": "Window Grills and Security Bars Installation",
+        "description": "Custom steel framing, cutting, and installation of window grills and security bars.",
+        "startingPrice": { "min": 1200, "max": 4000 }
+      },
+      {
+        "title": "Metal Furniture Fabrication",
+        "description": "Fabricating custom metal tables, bed frames, racks, and stands using steel bars or pipes.",
+        "startingPrice": { "min": 1000, "max": 4500 }
+      },
+      {
+        "title": "Structural Steel Welding (Minor Repairs)",
+        "description": "Repairing broken frames, metal trusses, steel posts, and connecting plates in residential structures.",
+        "startingPrice": { "min": 1500, "max": 5500 }
+      },
+      {
+        "title": "On-Site Welding Repair",
+        "description": "Welding and reworking damaged metal parts on gates, hinges, metal doors, frames, or railings at the client’s location.",
+        "startingPrice": { "min": 500, "max": 2000 }
+      }
+    ]
   }
 ]
