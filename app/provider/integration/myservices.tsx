@@ -5,8 +5,8 @@ import {
 } from "@expo-google-fonts/poppins";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -26,14 +26,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { getCertificates } from "../../../src/api/certificates.api";
 import {
     getProviderServices,
     toggleServiceAvailability,
     updateService
 } from "../../../src/api/services.api";
-import { getCertificates } from "../../../src/api/certificates.api";
-import type { Service } from "../../../src/types/service";
 import type { Certificate } from "../../../src/types/certificate";
+import type { Service } from "../../../src/types/service";
 import certificateServicesJson from "../../assets/data/certificateservices.json";
 
 type CertificateService = {
@@ -402,7 +402,6 @@ export default function MyServices() {
     };
 
     const getTotalPhotoCount = () => {
-        return existingPhotos.length - photosToRemove.length + newPhotos.length;
         return existingPhotos.length - photosToRemove.length + newPhotos.length;
     };
 

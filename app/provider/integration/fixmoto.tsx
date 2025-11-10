@@ -249,6 +249,22 @@ export default function FixMoToday() {
     };
 
     const handleEnRoute = async (appointment: Appointment) => {
+        // First, check if provider has any ongoing appointments
+        const hasOngoingAppointment = appointments.some(apt => 
+            apt.appointment_status === 'ongoing' || 
+            apt.appointment_status === 'in-progress' ||
+            apt.appointment_status === 'confirmed'
+        );
+
+        if (hasOngoingAppointment) {
+            Alert.alert(
+                'Cannot Start',
+                'You already have an ongoing appointment. Please complete it before starting a new one.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
         // Check if appointment is overdue or late
         const timingStatus = checkAppointmentTiming(appointment);
         const startTime = appointment.availability?.startTime || '';
@@ -627,6 +643,26 @@ export default function FixMoToday() {
         };
     };
 
+    /**
+     * Check if appointment is scheduled for today
+     * @param scheduledDate - The appointment's scheduled date
+     * @returns true if appointment is today, false otherwise
+     */
+    const isAppointmentToday = (scheduledDate: string): boolean => {
+        try {
+            const appointmentDate = parseISO(scheduledDate);
+            const now = new Date();
+            
+            // Compare only the date parts (ignore time)
+            const appointmentDay = new Date(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate());
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            
+            return appointmentDay.getTime() === today.getTime();
+        } catch {
+            return false;
+        }
+    };
+
     const isAppointmentDateReached = (scheduledDate: string): boolean => {
         // 🧪 TEMPORARY: Date check disabled for testing
         // TODO: Re-enable this check after testing
@@ -872,22 +908,64 @@ export default function FixMoToday() {
 
                                             {(item.appointment_status === "scheduled" || item.appointment_status === "approved") && isApproved && isAppointmentDateReached(item.scheduled_date) && (
                                                 <>
-                                                    {/* Only show En Route button if not overdue */}
-                                                    {timingStatus !== 'overdue' && (
-                                                        <TouchableOpacity style={styles.actionButton} onPress={() => handleEnRoute(item)}>
-                                                            <Text style={styles.actionButtonText}>En Route to Fix</Text>
-                                                        </TouchableOpacity>
-                                                    )}
-                                                    
-                                                    {/* Show overdue message if appointment is overdue */}
-                                                    {timingStatus === 'overdue' && (
-                                                        <View style={[styles.disabledButton, { borderColor: '#D32F2F', backgroundColor: '#FFEBEE' }]}>
-                                                            <Ionicons name="close-circle" size={16} color="#D32F2F" />
-                                                            <Text style={[styles.disabledButtonText, { color: '#D32F2F' }]}>
-                                                                Appointment Overdue - Cannot Start
-                                                            </Text>
-                                                        </View>
-                                                    )}
+                                                    {/* Only show En Route button if: 
+                                                        1. Not overdue
+                                                        2. Appointment is TODAY (not tomorrow or future dates)
+                                                        3. No ongoing appointments exist
+                                                    */}
+                                                    {(() => {
+                                                        const hasOngoingAppointment = appointments.some(apt => 
+                                                            apt.appointment_status === 'ongoing' || 
+                                                            apt.appointment_status === 'in-progress' ||
+                                                            apt.appointment_status === 'confirmed'
+                                                        );
+                                                        const isToday = isAppointmentToday(item.scheduled_date);
+                                                        const canShowButton = timingStatus !== 'overdue' && isToday && !hasOngoingAppointment;
+
+                                                        if (canShowButton) {
+                                                            return (
+                                                                <TouchableOpacity style={styles.actionButton} onPress={() => handleEnRoute(item)}>
+                                                                    <Text style={styles.actionButtonText}>En Route to Fix</Text>
+                                                                </TouchableOpacity>
+                                                            );
+                                                        }
+
+                                                        // Show why button is not available
+                                                        if (hasOngoingAppointment) {
+                                                            return (
+                                                                <View style={[styles.disabledButton, { borderColor: '#FF9800', backgroundColor: '#FFF3E0' }]}>
+                                                                    <Ionicons name="alert-circle" size={16} color="#FF9800" />
+                                                                    <Text style={[styles.disabledButtonText, { color: '#F57C00' }]}>
+                                                                        Complete ongoing appointment first
+                                                                    </Text>
+                                                                </View>
+                                                            );
+                                                        }
+
+                                                        if (!isToday) {
+                                                            return (
+                                                                <View style={styles.disabledButton}>
+                                                                    <Ionicons name="calendar-outline" size={16} color="#999" />
+                                                                    <Text style={styles.disabledButtonText}>
+                                                                        Available on {format(parseISO(item.scheduled_date), "MMM dd, yyyy")}
+                                                                    </Text>
+                                                                </View>
+                                                            );
+                                                        }
+
+                                                        if (timingStatus === 'overdue') {
+                                                            return (
+                                                                <View style={[styles.disabledButton, { borderColor: '#D32F2F', backgroundColor: '#FFEBEE' }]}>
+                                                                    <Ionicons name="close-circle" size={16} color="#D32F2F" />
+                                                                    <Text style={[styles.disabledButtonText, { color: '#D32F2F' }]}>
+                                                                        Appointment Overdue - Cannot Start
+                                                                    </Text>
+                                                                </View>
+                                                            );
+                                                        }
+
+                                                        return null;
+                                                    })()}
                                                     
                                                     <TouchableOpacity 
                                                         style={[styles.actionButton, styles.cancelButton]} 
