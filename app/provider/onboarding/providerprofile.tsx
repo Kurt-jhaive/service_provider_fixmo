@@ -53,7 +53,7 @@ export default function ProviderProfile() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const isApproved = user?.status === "approved";
+    const isApproved = providerProfile?.is_verified || false;
 
     // Animated bottom sheet
     const slideAnim = useState(new Animated.Value(300))[0];

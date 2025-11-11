@@ -35,6 +35,10 @@ export default function ApplicationReview() {
         setIsSubmitting(true);
 
         try {
+            // Debug: Log password from params
+            console.log('🔑 Password from params:', params.password);
+            console.log('🔑 All params:', Object.keys(params));
+
             // Create FormData with all collected information
             const formData = new FormData();
 
@@ -44,6 +48,7 @@ export default function ApplicationReview() {
 
             // Add basic information from basicinfo screen
             formData.append('provider_password', params.password as string);
+            console.log('🔑 Added provider_password to FormData:', params.password);
             formData.append('provider_first_name', params.firstName as string);
             formData.append('provider_last_name', params.lastName as string);
             formData.append('provider_userName', params.username as string);

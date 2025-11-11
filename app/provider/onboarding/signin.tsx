@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
@@ -22,6 +22,7 @@ import { registerPushTokenWithBackend } from "../../../src/utils/notificationhel
 
 export default function SignIn() {
     const router = useRouter();
+    const params = useLocalSearchParams<{ fromPasswordReset?: string }>();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
@@ -38,12 +39,18 @@ export default function SignIn() {
 
     // Check if user is already logged in on mount
     React.useEffect(() => {
+        // Skip auto-redirect if coming from password reset
+        if (params.fromPasswordReset === "true") {
+            console.log('🔐 Coming from password reset - skipping auto-redirect');
+            return;
+        }
+
         const timer = setTimeout(() => {
             checkExistingSession();
         }, 500); // Longer delay to ensure AsyncStorage is fully updated after logout
         
         return () => clearTimeout(timer);
-    }, []);
+    }, [params.fromPasswordReset]);
 
     const checkExistingSession = async () => {
         try {
@@ -133,10 +140,14 @@ export default function SignIn() {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
             <KeyboardAvoidingView
                 style={styles.screen}
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                keyboardVerticalOffset={60}
+                behavior={Platform.OS === "ios" ? "padding" : undefined}
+                keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 0}
             >
-                <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+                <ScrollView 
+                    contentContainerStyle={styles.container} 
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                >
                     <Image
                         source={require("../../../app/assets/images/fixmo-logo.png")}
                         style={styles.logo}
@@ -202,15 +213,17 @@ const styles = StyleSheet.create({
         backgroundColor: "#fff",
     },
     container: {
-        paddingHorizontal: 30,
-        justifyContent: "center",
         flexGrow: 1,
+        paddingHorizontal: 30,
+        paddingTop: 60,
+        paddingBottom: 30,
     },
     logo: {
         width: 120,
         height: 120,
         alignSelf: "center",
         marginBottom: 40,
+        marginTop: 20,
     },
     input: {
         backgroundColor: "#f2f2f2",

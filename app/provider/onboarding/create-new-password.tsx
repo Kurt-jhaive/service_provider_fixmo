@@ -107,7 +107,10 @@ export default function CreateNewPassword() {
                     {
                         text: "OK",
                         onPress: () => {
-                            router.replace("/provider/onboarding/signin");
+                            router.replace({
+                                pathname: "/provider/onboarding/signin",
+                                params: { fromPasswordReset: "true" }
+                            });
                         }
                     }
                 ]

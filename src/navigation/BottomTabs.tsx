@@ -12,7 +12,7 @@ type BottomTabsProps = {
 
 const tabIcons: Record<TabKey, string> = {
     home: "home",
-    task: "list",
+    task: "calendar-outline",
     myservices: "briefcase",
     messages: "chatbubbles-outline",
     profile: "person",

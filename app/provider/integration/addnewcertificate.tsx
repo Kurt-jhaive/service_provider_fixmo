@@ -161,7 +161,7 @@ export default function AddNewCertificate() {
         <SafeAreaView style={{flex: 1, backgroundColor: "#fff"}}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()}>
+                <TouchableOpacity onPress={() => router.replace('/provider/onboarding/mycertificate')}>
                     <Ionicons name="arrow-back" size={24} color="#333"/>
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Add Certificate</Text>

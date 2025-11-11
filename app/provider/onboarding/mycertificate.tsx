@@ -25,7 +25,7 @@ type Certificate = {
     uploadedAt: string;
     expiryDate: string;
     fileUri?: string;
-    status: "Approved" | "Pending" | "Rejected";
+    status: "Approved" | "Pending" | "Rejected" | "Expired";
 };
 
 if (Platform.OS === "android") {
@@ -67,7 +67,7 @@ export default function MyCertificates() {
         },
     ]);
 
-    const [activeTab, setActiveTab] = useState<"Approved" | "Pending" | "Rejected">("Approved");
+    const [activeTab, setActiveTab] = useState<"Approved" | "Pending" | "Rejected" | "Expired">("Approved");
     const [expandedCertId, setExpandedCertId] = useState<string | null>(null);
 
     useEffect(() => {
@@ -85,26 +85,43 @@ export default function MyCertificates() {
             }
 
             const data = await getCertificates(token);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
             // Map API data to local Certificate type
-            const mappedData: Certificate[] = data.map(cert => ({
-                id: cert.certificate_id.toString(),
-                name: cert.certificate_name,
-                certificateNumber: cert.certificate_number,
-                uploadedAt: new Date(cert.created_at).toLocaleDateString('en-US', { 
-                    year: 'numeric', 
-                    month: 'short', 
-                    day: 'numeric' 
-                }),
-                expiryDate: cert.expiry_date 
-                    ? new Date(cert.expiry_date).toLocaleDateString('en-US', { 
+            const mappedData: Certificate[] = data.map(cert => {
+                let status: "Approved" | "Pending" | "Rejected" | "Expired" = cert.certificate_status;
+                
+                // Check if certificate is expired
+                if (cert.expiry_date) {
+                    const expiryDate = new Date(cert.expiry_date);
+                    expiryDate.setHours(0, 0, 0, 0);
+                    
+                    if (expiryDate < today && status === 'Approved') {
+                        status = 'Expired';
+                    }
+                }
+
+                return {
+                    id: cert.certificate_id.toString(),
+                    name: cert.certificate_name,
+                    certificateNumber: cert.certificate_number,
+                    uploadedAt: new Date(cert.created_at).toLocaleDateString('en-US', { 
                         year: 'numeric', 
                         month: 'short', 
                         day: 'numeric' 
-                    }) 
-                    : 'No expiry date',
-                fileUri: cert.certificate_file_path,
-                status: cert.certificate_status,
-            }));
+                    }),
+                    expiryDate: cert.expiry_date 
+                        ? new Date(cert.expiry_date).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'short', 
+                            day: 'numeric' 
+                        }) 
+                        : 'No expiry date',
+                    fileUri: cert.certificate_file_path,
+                    status: status as "Approved" | "Pending" | "Rejected" | "Expired",
+                };
+            });
             setCertificates(mappedData);
         } catch (error: any) {
             Alert.alert('Error', error.message || 'Failed to load certificates');
@@ -120,7 +137,7 @@ export default function MyCertificates() {
         fetchCertificates();
     };
 
-    const tabs: ("Approved" | "Pending" | "Rejected")[] = ["Approved", "Pending", "Rejected"];
+    const tabs: ("Approved" | "Pending" | "Rejected" | "Expired")[] = ["Approved", "Pending", "Rejected", "Expired"];
     const filteredCertificates = certificates.filter((c) => c.status === activeTab);
 
     const toggleCertificate = (id: string) => {
@@ -132,6 +149,7 @@ export default function MyCertificates() {
         Approved: "#4CAF50",
         Pending: "#FBC02D",
         Rejected: "#E53935",
+        Expired: "#FF6B6B",
     };
 
     if (loading) {
@@ -214,6 +232,23 @@ export default function MyCertificates() {
                                                 <Ionicons name="cloud-upload-outline" size={18} color="#fff"/>
                                                 <Text style={styles.resubmitText}>Submit New Certificate</Text>
                                             </TouchableOpacity>
+                                        )}
+                                        {cert.status === "Expired" && (
+                                            <>
+                                                <View style={styles.expiredWarning}>
+                                                    <Ionicons name="alert-circle" size={20} color="#FF6B6B" />
+                                                    <Text style={styles.expiredWarningText}>
+                                                        This certificate has expired. Services linked to this certificate have been deactivated.
+                                                    </Text>
+                                                </View>
+                                                <TouchableOpacity 
+                                                    style={[styles.resubmitButton, {backgroundColor: "#FF6B6B"}]}
+                                                    onPress={() => router.push('/provider/integration/addnewcertificate')}
+                                                >
+                                                    <Ionicons name="refresh-outline" size={18} color="#fff"/>
+                                                    <Text style={styles.resubmitText}>Renew Certificate</Text>
+                                                </TouchableOpacity>
+                                            </>
                                         )}
                                     </>
                                 )}
@@ -347,12 +382,30 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         borderRadius: 8,
         marginTop: 12,
-        gap: 6,
+        gap: 8,
     },
     resubmitText: {
         color: "#fff",
         fontSize: 14,
         fontFamily: "Poppins-SemiBold",
+    },
+    expiredWarning: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        backgroundColor: "#FFEBEE",
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 12,
+        gap: 8,
+        borderLeftWidth: 4,
+        borderLeftColor: "#FF6B6B",
+    },
+    expiredWarningText: {
+        flex: 1,
+        fontSize: 13,
+        fontFamily: "Poppins-Regular",
+        color: "#C62828",
+        lineHeight: 18,
     },
 
     // Placeholder
