@@ -142,7 +142,7 @@ export default function FixMoToday() {
                 
                 // Navigate to rating screen
                 router.push({
-                    pathname: '/provider/integration/rate-customer',
+                    pathname: './integration/rate-customer',
                     params: {
                         appointment_id: appointmentToRate.appointment_id.toString(),
                         customer_id: customerId.toString(),
@@ -1080,7 +1080,7 @@ export default function FixMoToday() {
                                                                 style={[styles.backjobButton, styles.rescheduleButton]}
                                                                 onPress={() => {
                                                                     router.push({
-                                                                        pathname: "/provider/integration/reschedule-backjob",
+                                                                        pathname: "./integration/reschedule-backjob",
                                                                         params: {
                                                                             appointmentId: item.appointment_id.toString(),
                                                                             backjobId: item.current_backjob?.backjob_id.toString() || '',

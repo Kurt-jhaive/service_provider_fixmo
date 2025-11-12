@@ -250,6 +250,12 @@ export default function ProfileScreen() {
 
     // --- Validation ---
     const validateRequiredFields = () => {
+        // Check profile photo first
+        if (!photo) {
+            Alert.alert("Missing Information", "Please upload your profile photo.");
+            return false;
+        }
+
         const required = [
             {label: "First Name", value: firstName},
             {label: "Last Name", value: lastName},
@@ -378,6 +384,13 @@ export default function ProfileScreen() {
                     </Text>
 
                     {/* Profile Photo */}
+                    <View style={styles.labelRow}>
+                        <Text style={styles.labelText}>Profile Photo</Text>
+                        <Text style={styles.requiredAsterisk}>*</Text>
+                    </View>
+                    <Text style={styles.formalPhotoNote}>
+                        Please upload a formal photo for your profile
+                    </Text>
                     <TouchableOpacity onPress={selectPhotoOption} style={styles.photoContainer}>
                         {photo ? (
                             <Image source={{uri: photo}} style={styles.photo}/>
@@ -558,6 +571,14 @@ const styles = StyleSheet.create({
     },
     addPhotoText: {fontSize: 14, color: "#008080"},
     photo: {width: 100, height: 100, borderRadius: 50},
+    formalPhotoNote: {
+        fontSize: 13,
+        color: "#008080",
+        fontWeight: "500",
+        marginBottom: 12,
+        paddingHorizontal: 20,
+        textAlign: "center",
+    },
     instructions: {fontSize: 14, color: "#666", textAlign: "justify", marginBottom: 20, paddingHorizontal: 20},
     labelRow: {flexDirection: "row", alignItems: "center", marginBottom: 4, paddingHorizontal: 20},
     labelText: {fontSize: 16, color: "#333", fontWeight: "500"},
