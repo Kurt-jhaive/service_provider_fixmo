@@ -328,8 +328,14 @@ export default function FixMoToday() {
                 return;
             }
 
-            // Update status to ongoing
+            // Update status to confirmed (on the way)
             await startEnRoute(appointment.appointment_id, token);
+
+            // Store the confirmation timestamp for timer tracking
+            const confirmationTime = new Date().toISOString();
+            const storageKey = `enroute_start_${appointment.appointment_id}`;
+            await AsyncStorage.setItem(storageKey, confirmationTime);
+            console.log('✅ Saved confirmation timestamp:', confirmationTime);
 
             // Get provider location from AsyncStorage
             const providerData = await AsyncStorage.getItem('providerProfile');
@@ -1002,6 +1008,16 @@ export default function FixMoToday() {
                                                     onPress={async () => {
                                                         // Navigate to en route screen
                                                         try {
+                                                            // Ensure confirmation timestamp exists
+                                                            const storageKey = `enroute_start_${item.appointment_id}`;
+                                                            const existingTime = await AsyncStorage.getItem(storageKey);
+                                                            if (!existingTime) {
+                                                                // Create timestamp if it doesn't exist (for backwards compatibility)
+                                                                const confirmationTime = new Date().toISOString();
+                                                                await AsyncStorage.setItem(storageKey, confirmationTime);
+                                                                console.log('✅ Created missing confirmation timestamp:', confirmationTime);
+                                                            }
+
                                                             const providerData = await AsyncStorage.getItem('providerProfile');
                                                             let providerLocation = '';
                                                             if (providerData) {

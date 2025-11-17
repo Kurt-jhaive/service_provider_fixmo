@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    BackHandler,
     Image,
     Keyboard,
     KeyboardAvoidingView,
@@ -35,6 +36,17 @@ export default function SignIn() {
             const immediateId = await AsyncStorage.getItem('providerId');
             console.log('🚨 IMMEDIATE CHECK on signin mount - Token:', immediateToken ? 'EXISTS' : 'null', 'ID:', immediateId ? 'EXISTS' : 'null');
         })();
+    }, []);
+
+    // Prevent back navigation from sign-in screen
+    React.useEffect(() => {
+        const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+            // Return true to prevent default back behavior
+            // This prevents users from going back to fixmoto after logout
+            return true;
+        });
+
+        return () => backHandler.remove();
     }, []);
 
     // Check if user is already logged in on mount

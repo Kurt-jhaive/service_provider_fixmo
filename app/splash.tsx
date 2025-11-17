@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, StyleSheet, View } from "react-native";
+import { ActivityIndicator, BackHandler, Image, StyleSheet, View } from "react-native";
 
 export default function Splash() {
     const router = useRouter();
@@ -9,6 +9,16 @@ export default function Splash() {
 
     useEffect(() => {
         checkAuthAndRedirect();
+    }, []);
+
+    // Prevent back navigation from splash screen
+    useEffect(() => {
+        const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+            // Return true to prevent default back behavior
+            return true;
+        });
+
+        return () => backHandler.remove();
     }, []);
 
     const checkAuthAndRedirect = async () => {

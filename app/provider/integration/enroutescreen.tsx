@@ -38,7 +38,8 @@ export default function EnRouteScreen() {
 
     // Timer states for customer no-show feature
     const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
-    const [enRouteStartTime, setEnRouteStartTime] = useState<Date>(new Date());
+    const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+    const [enRouteStartTime, setEnRouteStartTime] = useState<Date | null>(null);
     const [showNoShowModal, setShowNoShowModal] = useState<boolean>(false);
     const [noShowDescription, setNoShowDescription] = useState<string>("");
     const [evidencePhoto, setEvidencePhoto] = useState<string | null>(null);
@@ -105,7 +106,17 @@ export default function EnRouteScreen() {
         try {
             const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
             
-            const response = await fetch(url);
+            // Add timeout to prevent hanging requests
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error(`OSRM API returned ${response.status}`);
+            }
+            
             const data = await response.json();
 
             if (data.code === "Ok" && data.routes && data.routes.length > 0) {
@@ -122,8 +133,8 @@ export default function EnRouteScreen() {
                 setDistance(`${distanceKm} km`);
             }
         } catch (error) {
-            console.error("Route fetch error:", error);
-            // Fallback: draw straight line
+            // Silently fallback to direct line (this is expected if offline or OSRM unavailable)
+            console.log("📍 Using direct route (OSRM unavailable)");
             setRouteCoordinates([origin, destination]);
             const dist = calculateDistance(origin.latitude, origin.longitude, destination.latitude, destination.longitude);
             setDistance(`${dist.toFixed(2)} km (direct)`);
@@ -269,21 +280,57 @@ export default function EnRouteScreen() {
         };
     }, []);
 
+    // Load or create confirmation timestamp when component mounts
+    useEffect(() => {
+        const loadConfirmationTime = async () => {
+            try {
+                const storageKey = `enroute_start_${appointmentId}`;
+                const storedTime = await AsyncStorage.getItem(storageKey);
+                
+                if (storedTime) {
+                    // Use existing timestamp
+                    const timestamp = new Date(storedTime);
+                    setEnRouteStartTime(timestamp);
+                    console.log('📅 Loaded existing confirmation time:', timestamp.toISOString());
+                } else {
+                    // Create new timestamp and save it
+                    const now = new Date();
+                    await AsyncStorage.setItem(storageKey, now.toISOString());
+                    setEnRouteStartTime(now);
+                    console.log('📅 Created new confirmation time:', now.toISOString());
+                }
+            } catch (error) {
+                console.error('Error loading confirmation time:', error);
+                // Fallback to current time
+                setEnRouteStartTime(new Date());
+            }
+        };
+
+        loadConfirmationTime();
+    }, [appointmentId]);
+
     // Timer to track elapsed time since en route started (for 1-hour customer no-show feature)
     useEffect(() => {
+        if (!enRouteStartTime) return;
+
         // Calculate immediately on mount
         const calculateElapsed = () => {
             const now = new Date();
-            const elapsed = Math.floor((now.getTime() - enRouteStartTime.getTime()) / 1000 / 60); // minutes
-            setElapsedMinutes(elapsed);
-            console.log('⏱️ Timer Update - Elapsed minutes:', elapsed);
+            const elapsedMs = now.getTime() - enRouteStartTime.getTime();
+            const elapsedMin = Math.floor(elapsedMs / 1000 / 60); // minutes
+            const elapsedSec = Math.floor((elapsedMs / 1000) % 60); // seconds
+            
+            setElapsedMinutes(elapsedMin);
+            setElapsedSeconds(elapsedSec);
+            
+            console.log('⏱️ Timer Update - Elapsed time:', `${elapsedMin}m ${elapsedSec}s`);
         };
 
         // Run immediately
         calculateElapsed();
 
-        // Then run every minute
-        const timerInterval = setInterval(calculateElapsed, 60000); // Update every minute
+        // Then run every second for real-time updates
+        const timerInterval = setInterval(calculateElapsed, 1000);
 
         return () => clearInterval(timerInterval);
     }, [enRouteStartTime]);
@@ -657,12 +704,15 @@ export default function EnRouteScreen() {
                         ) : null;
                     })()}
 
-                    {/* Timer display (for testing - shows minutes elapsed) */}
-                    {elapsedMinutes > 0 && (
-                        <Text style={styles.timerText}>
-                            Time elapsed: {elapsedMinutes} min{elapsedMinutes !== 1 ? 's' : ''}
-                            {elapsedMinutes < 60 && ` (No-show available in ${60 - elapsedMinutes} min${60 - elapsedMinutes !== 1 ? 's' : ''})`}
-                        </Text>
+                    {/* Timer display showing elapsed time since confirmation */}
+                    {(elapsedMinutes > 0 || elapsedSeconds > 0) && (
+                        <View style={styles.timerContainer}>
+                            <Ionicons name="time-outline" size={18} color="#666" />
+                            <Text style={styles.timerText}>
+                                Time elapsed: {elapsedMinutes}:{elapsedSeconds.toString().padStart(2, '0')}
+                                {elapsedMinutes < 60 && ` • No-show available in ${60 - elapsedMinutes} min`}
+                            </Text>
+                        </View>
                     )}
                 </View>
             </View>
@@ -972,12 +1022,21 @@ const styles = StyleSheet.create({
         fontFamily: "PoppinsSemiBold",
         marginLeft: 8,
     },
+    timerContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: "#F5F5F5",
+        borderRadius: 8,
+        gap: 6,
+    },
     timerText: {
-        fontSize: 12,
-        fontFamily: "PoppinsRegular",
-        color: "#999",
-        textAlign: "center",
-        marginTop: 8,
+        fontSize: 13,
+        fontFamily: "PoppinsMedium",
+        color: "#666",
     },
     modalOverlay: {
         flex: 1,
